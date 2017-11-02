@@ -56,7 +56,7 @@ Generation 2 completed
 Here is an example using this git repository directory itself (lines omitted and a colon shown for brevity):
 
 ~~~~
-$ urltest_webdav -u mud -p 'here is my passw0rd!' -U https://webdav.www.server.org/upload_dir/urltest_webdav -vnl urltest_webdav
+$ urltest_webdav -u mud -p 'here is my passw0rd!' -U https://webdav.www.server.org/upload_dir/urltest_webdav -vnl /tmp/urltest_webdav
 
 Mirroring content to 'https://webdav.www.udel.edu/www1_farm_webdav/urltest_webdav'
 
