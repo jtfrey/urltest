@@ -7,6 +7,18 @@
 
 #include "http_stats.h"
 
+typedef enum {
+	http_ops_method_get			= 0,
+	http_ops_method_mkcol,
+	http_ops_method_put,
+	http_ops_method_delete,
+	http_ops_method_propfind,
+	//
+	http_ops_method_max
+} http_ops_method;
+
+const char* http_ops_method_get_string(http_ops_method the_method);
+
 typedef struct _http_ops * http_ops_ref;
 
 http_ops_ref http_ops_create(void);

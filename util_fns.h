@@ -5,10 +5,7 @@
 #ifndef __UTIL_FNS_H__
 #define __UTIL_FNS_H__
 
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include <unistd.h>
+#include "config.h"
 
 char* strmcat(const char *s1, ...);
 char* strmcatd(const char *delim, const char *s1, ...);

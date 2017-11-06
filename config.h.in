@@ -1,0 +1,35 @@
+//
+// config.h
+//
+
+#ifndef __CONFIG_H__
+#define __CONFIG_H__
+
+#define URLTEST_WEBDAV_VERSION_MAJOR @URLTEST_WEBDAV_VERSION_MAJOR@
+#define URLTEST_WEBDAV_VERSION_MINOR @URLTEST_WEBDAV_VERSION_MINOR@
+#define URLTEST_WEBDAV_VERSION_BUG @URLTEST_WEBDAV_VERSION_BUG@
+
+#define URLTEST_WEBDAV_VERSION_STRING "@URLTEST_WEBDAV_VERSION_STRING@"
+
+#cmakedefine HAVE_UNISTD_H
+
+#cmakedefine HAVE_RANDOM
+#cmakedefine HAVE_SRANDOMDEV
+#cmakedefine HAVE_SRANDOM
+
+#cmakedefine HAVE_ASPRINTF
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <string.h>
+#include <errno.h>
+#include <float.h>
+#include <math.h>
+
+#ifdef HAVE_UNISTD_H
+# include <unistd.h>
+#endif /* HAVE_UNISTD_H */
+
+#endif /* __CONFIG_H__ */

@@ -2,13 +2,28 @@
 // http_ops.c
 //
 
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include <curl/curl.h>
-
 #include "http_ops.h"
 #include "util_fns.h"
+
+#include <curl/curl.h>
+
+//
+
+const char*
+http_ops_method_get_string(
+	http_ops_method		the_method
+)
+{
+	static const char* __http_ops_method_strings[] = {
+																"GET     ",
+																"MKCOL   ",
+																"PUT     ",
+																"DELETE  ",
+																"PROPFIND"
+															};
+	if ( the_method >= http_ops_method_get && the_method < http_ops_method_max ) return __http_ops_method_strings[the_method];
+	return NULL;
+}
 
 //
 

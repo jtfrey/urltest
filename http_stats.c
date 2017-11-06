@@ -2,11 +2,6 @@
 // http_stats.c
 //
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <math.h>
-#include <float.h>
 #include "http_stats.h"
 
 //
@@ -127,6 +122,12 @@ http_stats_update(
   curl_easy_getinfo(curl_request, CURLINFO_SIZE_DOWNLOAD, &timing[http_stats_field_content_bytes]);
   
   //
+  // Update the counts:
+  //
+	the_stats->count[http_stats_bystatus_all]++;
+	the_stats->count[i_s]++;
+  
+  //
   // Update the min/max/avg fields:
   //
   for ( i_f = http_stats_field_dns; i_f < http_stats_field_max; i_f++ ) {
@@ -136,7 +137,6 @@ http_stats_update(
     // All responses:
     if ( timing[i_f] < the_stats->min[http_stats_bystatus_all][i_f] ) the_stats->min[http_stats_bystatus_all][i_f] = timing[i_f];
     if ( timing[i_f] > the_stats->max[http_stats_bystatus_all][i_f] ) the_stats->max[http_stats_bystatus_all][i_f] = timing[i_f];
-    the_stats->count[http_stats_bystatus_all]++;
     //
     // Update the running variance accumulators:
     //   ( http://www.johndcook.com/blog/standard_deviation/ )
@@ -153,7 +153,6 @@ http_stats_update(
     // Specific http status:
     if ( timing[i_f] < the_stats->min[i_s][i_f] ) the_stats->min[i_s][i_f] = timing[i_f];
     if ( timing[i_f] > the_stats->max[i_s][i_f] ) the_stats->max[i_s][i_f] = timing[i_f];
-    the_stats->count[i_s]++;
     //
     // Update the running variance accumulators:
     //   ( http://www.johndcook.com/blog/standard_deviation/ )
@@ -172,13 +171,31 @@ http_stats_update(
 
 //
 
-void
-http_stats_print(
-  http_stats_ref  the_stats,
-  bool            should_show_all_bystatus
+bool
+http_stats_is_empty(
+	http_stats_ref	 the_stats
 )
 {
-  http_stats_fprint(stdout, the_stats, should_show_all_bystatus);
+  http_stats_bystatus   i_s;
+  int                   how_many = 0;
+
+	// Check to be sure we have anything to show:
+	for ( i_s = http_stats_bystatus_2XX; i_s < http_stats_bystatus_max; i_s++ ) {
+		if ( the_stats->count[i_s] > 0 ) how_many++;
+	}
+  return (how_many > 0) ? false : true;
+}
+
+//
+
+void
+http_stats_print(
+	http_stats_format 			format,
+	http_stats_print_flags	flags, 
+  http_stats_ref		  		the_stats
+)
+{
+  http_stats_fprint(stdout, format, flags, the_stats);
 }
 
 //
@@ -189,58 +206,139 @@ const char      *http_stats_bystatus_labels[] = { "All requests", "2XX", "3XX", 
 
 void
 http_stats_fprint(
-  FILE            *fptr,
-  http_stats_ref  the_stats,
-  bool            should_show_all_bystatus
+  FILE            				*fptr,
+	http_stats_format 			format,
+	http_stats_print_flags	flags, 
+  http_stats_ref  				the_stats
 )
 {
   http_stats_bystatus   i_s;
   http_stats_field      i_f;
-  int                   how_many = 0;
   
-  if ( ! should_show_all_bystatus ) {
-    // Check to be sure we have anything to show:
-    for ( i_s = http_stats_bystatus_2XX; i_s < http_stats_bystatus_max; i_s++ ) {
-      if ( the_stats->count[i_s] > 0 ) how_many++;
-    }
-  } else {
-    how_many = http_stats_bystatus_max;
+  if ( (flags & http_stats_print_flags_header_only) == http_stats_print_flags_header_only  ) {
+  	flags &= ~http_stats_print_flags_no_header;
   }
-  if ( how_many > 0 ) {
-    fprintf(fptr,
-        "~~~~~~~~~~~~~~~~~~~~~~~~ ~~~~~~~~ ~~~~~~~~ ~~~~~~~~ ~~~~~~~~~~ ~~~~~~~~~~\n"
-        "%-24s %8s %8s %8s %10s %10s\n"
-        "~~~~~~~~~~~~~~~~~~~~~~~~ ~~~~~~~~ ~~~~~~~~ ~~~~~~~~ ~~~~~~~~~~ ~~~~~~~~~~\n",
-        "data point", "#req", "min", "max", "avg", "std dev"
-      );
-    for ( i_s = (how_many == 1) ? http_stats_bystatus_2XX : http_stats_bystatus_all; i_s < http_stats_bystatus_max; i_s++ ) {
-      if ( the_stats->count[i_s] > 0 ) {
-        fprintf(fptr, "%-24s %8s %8s %8s %10s %10s\n", http_stats_bystatus_labels[i_s], "", "min", "max", "avg", "std dev");
-        for ( i_f = http_stats_field_dns; i_f < http_stats_field_max; i_f++ ) {
-          if ( the_stats->count[i_s] > 1 ) {
-            fprintf(fptr,
-                "+ %-22s %8u %8.3lg %8.3lg %10.3lg %10.3lg\n",
-                http_stats_field_labels[i_f],
-                the_stats->count[i_s],
-                the_stats->min[i_s][i_f],
-                the_stats->max[i_s][i_f],
-                the_stats->m_i[i_s][i_f],
-                sqrt(the_stats->s_i[i_s][i_f] / (the_stats->count[i_s] - 1))
-              );
-          } else {
-            fprintf(fptr,
-                "+ %-22s %8u %8.3lg %8.3lg %10.3lg %10s\n",
-                http_stats_field_labels[i_f],
-                the_stats->count[i_s],
-                the_stats->min[i_s][i_f],
-                the_stats->max[i_s][i_f],
-                the_stats->m_i[i_s][i_f],
-                "n/a"
-              );
-          }
-        }
-        fprintf(fptr, "~~~~~~~~~~~~~~~~~~~~~~~~ ~~~~~~~~ ~~~~~~~~ ~~~~~~~~ ~~~~~~~~~~ ~~~~~~~~~~\n");
-      }
-    }
-  }
+
+	switch ( format ) {
+	
+		case http_stats_format_table: {
+			int                   how_many = 0;
+  
+			if ( (flags & http_stats_print_flags_show_all) != http_stats_print_flags_show_all ) {
+				// Check to be sure we have anything to show:
+				for ( i_s = http_stats_bystatus_2XX; i_s < http_stats_bystatus_max; i_s++ ) {
+					if ( the_stats->count[i_s] > 0 ) how_many++;
+				}
+			} else {
+				how_many = http_stats_bystatus_max;
+			}
+			if ( ((flags & http_stats_print_flags_header_only) == http_stats_print_flags_header_only) || (how_many > 0) ) {
+				if ( (flags & http_stats_print_flags_no_header) != http_stats_print_flags_no_header ) {
+					fprintf(fptr,
+							"~~~~~~~~~~~~~~~~~~~~~~~~ ~~~~~~~~ ~~~~~~~~ ~~~~~~~~ ~~~~~~~~~~ ~~~~~~~~~~\n"
+							"%-24s %8s %8s %8s %10s %10s\n"
+							"~~~~~~~~~~~~~~~~~~~~~~~~ ~~~~~~~~ ~~~~~~~~ ~~~~~~~~ ~~~~~~~~~~ ~~~~~~~~~~\n",
+							"data point", "#req", "min", "max", "avg", "std dev"
+						);
+					if ( (flags & http_stats_print_flags_header_only) == http_stats_print_flags_header_only ) return;
+				}
+				for ( i_s = (how_many == 1) ? http_stats_bystatus_2XX : http_stats_bystatus_all; i_s < http_stats_bystatus_max; i_s++ ) {
+					if ( the_stats->count[i_s] > 0 ) {
+						fprintf(fptr, "%-24s %8s %8s %8s %10s %10s\n", http_stats_bystatus_labels[i_s], "", "min", "max", "avg", "std dev");
+						for ( i_f = http_stats_field_dns; i_f < http_stats_field_max; i_f++ ) {
+							if ( the_stats->count[i_s] > 1 ) {
+								fprintf(fptr,
+										"+ %-22s %8u %8.3lg %8.3lg %10.3lg %10.3lg\n",
+										http_stats_field_labels[i_f],
+										the_stats->count[i_s],
+										the_stats->min[i_s][i_f],
+										the_stats->max[i_s][i_f],
+										the_stats->m_i[i_s][i_f],
+										sqrt(the_stats->s_i[i_s][i_f] / (the_stats->count[i_s] - 1))
+									);
+							} else {
+								fprintf(fptr,
+										"+ %-22s %8u %8.3lg %8.3lg %10.3lg %10s\n",
+										http_stats_field_labels[i_f],
+										the_stats->count[i_s],
+										the_stats->min[i_s][i_f],
+										the_stats->max[i_s][i_f],
+										the_stats->m_i[i_s][i_f],
+										"n/a"
+									);
+							}
+						}
+						fprintf(fptr, "~~~~~~~~~~~~~~~~~~~~~~~~ ~~~~~~~~ ~~~~~~~~ ~~~~~~~~ ~~~~~~~~~~ ~~~~~~~~~~\n");
+					}
+				}
+			}
+			break;
+		}
+	
+		case http_stats_format_csv:
+		case http_stats_format_tsv: {
+			char						delim;
+			
+			switch ( format ) {
+				case http_stats_format_csv: delim = ','; break;
+				case http_stats_format_tsv: delim = '\t'; break;
+				default: break;
+			}
+			//
+			// Header row?
+			//
+			if ( (flags & http_stats_print_flags_no_header) != http_stats_print_flags_no_header ) {
+				for ( i_s = http_stats_bystatus_2XX; i_s < http_stats_bystatus_max; i_s++ ) {
+					fprintf(fptr, (i_s == http_stats_bystatus_2XX) ? "\"count, %1$s\"" : "%2$c\"count, %1$s\"", http_stats_bystatus_labels[i_s], delim);
+					for ( i_f = http_stats_field_dns; i_f < http_stats_field_max; i_f++ ) {
+						fprintf(fptr,
+								"%3$c\"min, %1$s %2$s\"%3$c\"max, %1$s %2$s\"%3$c\"avg, %1$s %2$s\"%3$c\"stddev, %1$s %2$s\"",
+								http_stats_bystatus_labels[i_s], http_stats_field_labels[i_f], delim
+							);
+					}
+				}
+				fputc('\n', fptr);
+				if ( (flags & http_stats_print_flags_header_only) == http_stats_print_flags_header_only ) return;
+			}
+			
+			for ( i_s = http_stats_bystatus_2XX; i_s < http_stats_bystatus_max; i_s++ ) {
+				if ( the_stats->count[i_s] > 0 ) {
+					fprintf(fptr, (i_s == http_stats_bystatus_2XX) ? "%1$u" : "%2$c%1$u", the_stats->count[i_s], delim);
+				} else if ( i_s > http_stats_bystatus_2XX ) {
+					fprintf(fptr, "%c", delim);
+				}
+				for ( i_f = http_stats_field_dns; i_f < http_stats_field_max; i_f++ ) {
+					if ( the_stats->count[i_s] == 0 ) {
+						fprintf(fptr,
+								"%c%c%c%c",
+								delim, delim, delim, delim
+							);
+					} else if ( the_stats->count[i_s] > 1 ) {
+						fprintf(fptr,
+								"%c%g%c%g%c%g%c%g",
+								delim, the_stats->min[i_s][i_f],
+								delim, the_stats->max[i_s][i_f],
+								delim, the_stats->m_i[i_s][i_f],
+								delim, sqrt(the_stats->s_i[i_s][i_f] / (the_stats->count[i_s] - 1))
+							);
+					} else {
+						fprintf(fptr,
+								"%c%g%c%g%c%g%c",
+								delim, the_stats->min[i_s][i_f],
+								delim, the_stats->max[i_s][i_f],
+								delim, the_stats->m_i[i_s][i_f],
+								delim
+							);
+					}
+				}
+			}
+			fputc('\n', fptr);
+			break;
+		}
+		
+		case http_stats_format_max:
+			break;
+			
+	}
+	
 }

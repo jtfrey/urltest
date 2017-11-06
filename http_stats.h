@@ -5,7 +5,8 @@
 #ifndef __HTTP_STATS_H__
 #define __HTTP_STATS_H__
 
-#include <stdbool.h>
+#include "config.h"
+
 #include <curl/curl.h>
 
 typedef enum {
@@ -49,7 +50,25 @@ void http_stats_reset(http_stats_ref the_stats);
 
 bool http_stats_update(http_stats_ref the_stats, CURL *curl_request);
 
-void http_stats_print(http_stats_ref the_stats, bool should_show_all_bystatus);
-void http_stats_fprint(FILE *fptr, http_stats_ref the_stats, bool should_show_all_bystatus);
+bool http_stats_is_empty(http_stats_ref the_stats);
+
+typedef enum {
+	http_stats_print_flags_none = 0,
+	http_stats_print_flags_show_all = 1 << 0,
+	http_stats_print_flags_no_newline = 1 << 1,
+	http_stats_print_flags_no_header = 1 << 2,
+	http_stats_print_flags_header_only = 1 << 3
+} http_stats_print_flags;
+
+typedef enum {
+	http_stats_format_table = 0,
+	http_stats_format_csv,
+	http_stats_format_tsv,
+	//
+	http_stats_format_max
+} http_stats_format;
+
+void http_stats_print(http_stats_format format, http_stats_print_flags flags, http_stats_ref the_stats);
+void http_stats_fprint(FILE *fptr, http_stats_format format, http_stats_print_flags flags, http_stats_ref the_stats);
 
 #endif /* __HTTP_STATS_H__ */

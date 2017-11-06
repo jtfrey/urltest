@@ -5,9 +5,9 @@
 #ifndef __FS_ENTITY_H__
 #define __FS_ENTITY_H__
 
-#include <stdio.h>
-#include <stdlib.h>
+#include "config.h"
 
+#include "http_ops.h"
 #include "http_stats.h"
 
 //
@@ -39,7 +39,7 @@ typedef struct _fs_entity {
   unsigned int        generation;
   size_t              size;
   fs_entity_state     state;
-  http_stats_ref      http_stats;
+  http_stats_ref      http_stats[http_ops_method_max];
   
   struct _fs_entity   *sibling, *child;
 } fs_entity;
@@ -47,6 +47,7 @@ typedef struct _fs_entity {
 typedef struct _fs_entity_list {
   unsigned int        count;
   unsigned int        generation;
+  unsigned int        disabled_states;
   const char          *base_path;
   fs_entity           *root_entity;
 } fs_entity_list;
@@ -83,11 +84,14 @@ void fs_entity_list_fprint(FILE *fptr, fs_entity_print_format format, fs_entity_
 
 fs_entity* fs_entity_list_random_node(fs_entity_list *the_list, unsigned int max_generation);
 
-void fs_entity_advance_state(fs_entity *root_entity);
+bool fs_entity_list_get_state_is_enabled(fs_entity_list *the_list, fs_entity_state state);
+void fs_entity_list_set_state_is_enabled(fs_entity_list *the_list, fs_entity_state state, bool is_enabled);
+
+void fs_entity_list_advance_entity_state(fs_entity_list *the_list, fs_entity *root_entity);
 
 const char* fs_entity_list_url_for_entity(fs_entity_list *the_list, const char *base_url, fs_entity *the_entity);
 
-void fs_entity_list_stats_print(fs_entity_print_format format, fs_entity_list *the_list);
-void fs_entity_list_stats_fprint(FILE *fptr, fs_entity_print_format format, fs_entity_list *the_list);
+void fs_entity_list_stats_print(http_stats_format format, http_stats_print_flags flags, fs_entity_list *the_list);
+void fs_entity_list_stats_fprint(FILE *fptr, http_stats_format format, http_stats_print_flags flags, fs_entity_list *the_list);
 
 #endif /* __FS_ENTITY_H__ */

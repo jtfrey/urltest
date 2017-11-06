@@ -2,15 +2,12 @@
 // fs_entity.c
 //
 
-#include <string.h>
-#include <stdbool.h>
-#include <math.h>
-#include <float.h>
+#include "fs_entity.h"
+
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fts.h>
 
-#include "fs_entity.h"
 #include "util_fns.h"
 
 //
@@ -34,6 +31,18 @@ __fs_entity_kind_to_token(
   
   if ( (format & fs_entity_print_format_ascii) == fs_entity_print_format_ascii ) return ascii_kind_str[kind];
   return utf8_kind_str[kind];
+}
+
+//
+
+const char*
+__fs_entity_kind_to_string(
+  fs_entity_kind          kind
+)
+{
+  static const char*  kind_str[] = { "directory", "file", "unknown" };
+  
+  return kind_str[kind];
 }
 
 //
@@ -66,14 +75,17 @@ __fs_entity_create(
     
     new_entity = malloc(sizeof(fs_entity) + path_len);
     if ( new_entity ) {
-      new_entity->kind        = kind;
-      new_entity->state       = fs_entity_state_upload;
-      new_entity->sibling     = NULL;
-      new_entity->child       = NULL;
-      new_entity->generation  = 0;
-      new_entity->size        = 0;
+      http_ops_method								i_m;
       
-      new_entity->http_stats  = http_stats_create();
+      new_entity->kind              = kind;
+      new_entity->generation        = 0;
+      new_entity->size              = 0;
+      new_entity->state             = fs_entity_state_upload;
+      new_entity->sibling           = NULL;
+      new_entity->child             = NULL;
+      
+      for ( i_m = http_ops_method_get; i_m < http_ops_method_max; i_m++ )
+      	new_entity->http_stats[i_m] = http_stats_create();
       
       new_entity->path = ((void*)new_entity) + sizeof(fs_entity);
       strncpy((char*)new_entity->path, path, path_len);
@@ -203,10 +215,11 @@ fs_entity_list_create_with_path(
     fs_entity_list  *the_list = malloc(sizeof(fs_entity_list));
     
     if ( the_list ) {
-      the_list->count       = count;
-      the_list->generation  = 0;
-      the_list->root_entity = root_entity;
-      the_list->base_path   = base_path;
+      the_list->count             = count;
+      the_list->generation        = 0;
+      the_list->disabled_states   = 0;
+      the_list->root_entity       = root_entity;
+      the_list->base_path         = base_path;
     }
     return the_list;
   }
@@ -221,10 +234,14 @@ __fs_entity_destroy(
 )
 {
   if ( root_entity ) {
-    fs_entity   *e = root_entity->sibling;
+  	http_ops_method		i_m;
+    fs_entity   			*e = root_entity->sibling;
     
     if ( root_entity->child ) __fs_entity_destroy(root_entity->child);
     
+    for ( i_m = http_ops_method_get; i_m < http_ops_method_max; i_m++ )
+    	http_stats_destroy(root_entity->http_stats[i_m]);
+    	
     free(root_entity);
     
     if ( e ) __fs_entity_destroy(e);
@@ -383,10 +400,15 @@ fs_entity_list_print(
 //
 
 void
-fs_entity_advance_state(
-  fs_entity     *root_entity
+fs_entity_list_advance_entity_state(
+  fs_entity_list      *the_list,
+  fs_entity           *root_entity
 )
 {
+  fs_entity_state     start_state = root_entity->state;
+  
+try_again:
+
   switch ( root_entity->kind ) {
   
     case fs_entity_kind_directory:
@@ -461,14 +483,27 @@ fs_entity_advance_state(
       break;
   
   }
+  //
+  // Skip disabled states...
+  //
+  if ( ((1 << root_entity->state) & (the_list->disabled_states)) != 0 ) {
+    //
+    // ...but only so long as we haven't looped back around to the state
+    // when this function was entered!
+    //
+    if ( root_entity->state != start_state ) goto try_again;
+    fprintf(stderr, "ERROR:  illegal state disablement configuration -- loop detected\n");
+    exit(EINVAL);
+  }
 }
 
 //
 
 fs_entity*
 __fs_entity_random_node(
-  fs_entity     *root_entity,
-  unsigned int  generation
+  fs_entity_list  *the_list,
+  fs_entity       *root_entity,
+  unsigned int    generation
 )
 {
   fs_entity     *e;
@@ -505,18 +540,18 @@ __fs_entity_random_node(
               case fs_entity_state_upload_sub:
               case fs_entity_state_download_sub:
               case fs_entity_state_delete_sub: {
-                node = __fs_entity_random_node(e->child, generation);
+                node = __fs_entity_random_node(the_list, e->child, generation);
                 //
                 // If nothing was returned, then the child chain has completed and
                 // this node can step forward and be returned:
                 //
                 if ( ! node ) {
-                  fs_entity_advance_state(e);
+                  fs_entity_list_advance_entity_state(the_list, e);
                   // If the state advanced into the fs_entity_state_download_sub state 
                   // (from fs_entity_state_upload_sub) and no children were waiting to
                   // change state then it's implied that theres nothing to download
                   // anyway, so advance again: 
-                  if ( e->state == fs_entity_state_download_sub ) fs_entity_advance_state(e);
+                  if ( e->state == fs_entity_state_download_sub ) fs_entity_list_advance_entity_state(the_list, e);
                   node = e;
                 }
                 return node;
@@ -567,9 +602,41 @@ fs_entity_list_random_node(
     if ( avg >= (double)(1 + the_list->generation) ) {
       the_list->generation++;
     }
-    if ( the_list->generation < max_generation ) return __fs_entity_random_node(the_list->root_entity, 1 + the_list->generation);
+    if ( the_list->generation < max_generation ) return __fs_entity_random_node(the_list, the_list->root_entity, 1 + the_list->generation);
   }
   return NULL;
+}
+
+//
+
+bool
+fs_entity_list_get_state_is_enabled(
+  fs_entity_list      *the_list,
+  fs_entity_state     state
+)
+{
+  if ( state >= fs_entity_state_upload && state < fs_entity_state_max ) {
+    return ((1 << state) & the_list->disabled_states) ? false : true;
+  }
+  return false;
+}
+
+//
+
+void
+fs_entity_list_set_state_is_enabled(
+  fs_entity_list      *the_list,
+  fs_entity_state     state,
+  bool                is_enabled
+)
+{
+  if ( state >= fs_entity_state_upload && state < fs_entity_state_max ) {
+    if ( is_enabled ) {
+      the_list->disabled_states &= ~(1 << state);
+    } else {
+      the_list->disabled_states |= (1 << state);
+    }
+  }
 }
 
 //
@@ -611,11 +678,12 @@ fs_entity_list_url_for_entity(
 
 void
 fs_entity_list_stats_print(
-  fs_entity_print_format  format, 
+  http_stats_format 			format,
+  http_stats_print_flags	flags, 
   fs_entity_list          *the_list
 )
 {
-  fs_entity_list_stats_fprint(stdout, format, the_list);
+  fs_entity_list_stats_fprint(stdout, format, flags, the_list);
 }
 
 //
@@ -623,41 +691,122 @@ fs_entity_list_stats_print(
 void
 __fs_entity_stats_fprint(
   FILE                    *fptr,
-  fs_entity_print_format  format, 
+  http_stats_format 			format,
+  http_stats_print_flags	flags, 
   fs_entity               *entity
 )
 {
-  while ( entity ) {
-    if ( (format & fs_entity_print_format_kind) == fs_entity_print_format_kind ) {
-      fprintf(fptr, "%s ", __fs_entity_kind_to_token(format, entity->kind));
-    }
-    
-    if ( (format & fs_entity_print_format_name) == fs_entity_print_format_name ) {
-      if ( (format & fs_entity_print_format_path) == fs_entity_print_format_path ) {
-        fprintf(fptr, "%s (%s)\n", entity->name, entity->path);
-      } else {
-        fprintf(fptr, "%s\n", entity->name);
-      }
-    } else if ( (format & fs_entity_print_format_path) == fs_entity_print_format_path ) {
-      fprintf(fptr, "%s\n", entity->path);
-    }
-    http_stats_fprint(fptr, entity->http_stats, false);
-    fprintf(fptr, "\n");
-    
-    // Handle all children:
-    if ( (entity->kind == fs_entity_kind_directory) && entity->child ) __fs_entity_stats_fprint(fptr, format, entity->child);
-  
-    // Next sibling:
-    entity = entity->sibling;
-  }
+	switch ( format ) {
+	
+		case http_stats_format_table: {
+			while ( entity ) {
+				http_ops_method				i_m;
+		
+				if ( (format & fs_entity_print_format_kind) == fs_entity_print_format_kind ) {
+					fprintf(fptr, "%s ", __fs_entity_kind_to_token(fs_entity_print_format_ascii, entity->kind));
+				}
+		
+				if ( (format & fs_entity_print_format_name) == fs_entity_print_format_name ) {
+					if ( (format & fs_entity_print_format_path) == fs_entity_print_format_path ) {
+						fprintf(fptr, "%s (%s)\n", entity->name, entity->path);
+					} else {
+						fprintf(fptr, "%s\n", entity->name);
+					}
+				} else if ( (format & fs_entity_print_format_path) == fs_entity_print_format_path ) {
+					fprintf(fptr, "%s\n", entity->path);
+				}
+				for ( i_m = http_ops_method_get; i_m < http_ops_method_max; i_m++ ) {
+					if ( ! http_stats_is_empty(entity->http_stats[i_m]) ) {
+						fprintf(fptr, "[%s]\n", http_ops_method_get_string(i_m));
+						http_stats_fprint(fptr, format, flags, entity->http_stats[i_m]);
+						fprintf(fptr, "\n");
+					}
+				}
+		
+				// Handle all children:
+				if ( (entity->kind == fs_entity_kind_directory) && entity->child ) __fs_entity_stats_fprint(fptr, format, flags, entity->child);
+	
+				// Next sibling:
+				entity = entity->sibling;
+			}
+			break;
+		}
+				
+		case http_stats_format_csv:
+		case http_stats_format_tsv: {
+			char						delim;
+		
+			switch ( format ) {
+				case http_stats_format_csv: delim = ','; break;
+				case http_stats_format_tsv: delim = '\t'; break;
+				
+				case http_stats_format_table:
+				case http_stats_format_max:
+					break;
+			}
+			while ( entity ) {
+				http_ops_method				i_m;
+				
+				for ( i_m = http_ops_method_get; i_m < http_ops_method_max; i_m++ ) {
+					fprintf(fptr,
+							"\"%s\"%c\"%s\"%c\"%s\"%c",
+							__fs_entity_kind_to_string(entity->kind), delim,
+							entity->path, delim,
+							http_ops_method_get_string(i_m), delim
+						);
+					http_stats_fprint(fptr, format, (flags | http_stats_print_flags_no_header) & ~http_stats_print_flags_header_only, entity->http_stats[i_m]);
+				}
+		
+				// Handle all children:
+				if ( (entity->kind == fs_entity_kind_directory) && entity->child ) __fs_entity_stats_fprint(fptr, format, (flags | http_stats_print_flags_no_header) & ~http_stats_print_flags_header_only, entity->child);
+	
+				// Next sibling:
+				entity = entity->sibling;
+			}
+			break;
+		}
+		
+		case http_stats_format_max:
+			break;
+		
+	}
 }
 
 void
 fs_entity_list_stats_fprint(
   FILE                    *fptr,
-  fs_entity_print_format  format, 
+  http_stats_format 			format,
+  http_stats_print_flags	flags, 
   fs_entity_list          *the_list
 )
 {
-  __fs_entity_stats_fprint(fptr, format, the_list->root_entity);
+	if ( (flags & http_stats_print_flags_no_header) != http_stats_print_flags_no_header ) {
+		switch ( format ) {
+			case http_stats_format_table:
+				if ( (flags & http_stats_print_flags_header_only) == http_stats_print_flags_header_only ) return;
+				break;
+				
+			case http_stats_format_csv:
+			case http_stats_format_tsv: {
+				char						delim;
+			
+				switch ( format ) {
+					case http_stats_format_csv: delim = ','; break;
+					case http_stats_format_tsv: delim = '\t'; break;
+					
+					case http_stats_format_table:
+					case http_stats_format_max:
+					  break;
+				}
+				fprintf(fptr, "\"kind\"%1$c\"path\"%1$c\"method\"%1$c", delim);
+				http_stats_fprint(fptr, format, http_stats_print_flags_header_only, NULL);
+				if ( (flags & http_stats_print_flags_header_only) == http_stats_print_flags_header_only ) return;
+				break;
+			}
+			
+			case http_stats_format_max:
+				break;
+		}
+	}
+  __fs_entity_stats_fprint(fptr, format, flags, the_list->root_entity);
 }

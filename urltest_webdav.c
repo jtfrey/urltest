@@ -6,12 +6,9 @@
 //
 //
 
-#include <stdio.h>
-#include <stdbool.h>
-#include <string.h>
-#include <unistd.h>
+#include "config.h"
+
 #include <getopt.h>
-#include <errno.h>
 
 #include <curl/curl.h>
 
@@ -37,17 +34,18 @@ static const struct option urltest_webdav_options[] = {
     //
     { "verbose",          no_argument,          NULL,       'v' },
     { "dry-run",          no_argument,          NULL,       'd' },
-    { "show-timings",     no_argument,          NULL,       't' },
+    { "show-timings",     optional_argument,    NULL,       't' },
     { "generations",      required_argument,    NULL,       'g' },
     //
     { "base-url",         required_argument,    NULL,       'U' },
     { "host-mapping",     required_argument,    NULL,       'm' },
+    { "no-delete",        no_argument,          NULL,       'D' },
     { "username",         required_argument,    NULL,       'u' },
     { "password",         required_argument,    NULL,       'p' },
     { NULL,               0,                    NULL,        0  }
   };
 
-static const char *urltest_webdav_optstring = "h" "lsna" "dvtg:" "U:m:u:p:";
+static const char *urltest_webdav_optstring = "h" "lsna" "dvtg:" "U:m:Du:p:";
 
 //
 
@@ -75,12 +73,17 @@ usage(
       "                               program progresses\n"
       "  --dry-run/-d                 do not perform any HTTP requests, just show an\n"
       "                               activity trace\n"
-      "  --show-timings/-t            show HTTP timing statistics at the end of the run\n"
+      "  --show-timings/-t <out>      show HTTP timing statistics at the end of the run\n"
+      "\n"
+      "                                 <out> = <format>{:<path>}\n"
+      "                                 <format> = table | csv | tsv\n"
+      "\n"
       "  --generations/-g <#>         maximum number of generations to iterate\n"
       "\n"
       "  --base-url/-U <URL>          the base URL to which the content should be mirrored\n"
       "  --host-mapping/-m <hostmap>  provide a static DNS mapping for a hostname and TCP/IP\n"
       "                               port\n"
+      "  --no-delete/-D               do not delete anything on the remote side\n"
       "\n"
       "                                 <hostmap> = <hostname>:<port>:<ip address>\n"
       "\n"
@@ -107,11 +110,14 @@ main(
   bool                      is_dry_run = false;
   bool                      should_show_file_list = true;
   bool                      should_show_timings = false;
+  bool                      should_delete = true;
   unsigned int              generations = 1;
   fs_entity_print_format    print_format = fs_entity_print_format_default;
   fs_entity_print_format    print_charset = 0;
+  http_stats_format					stats_format = http_stats_format_table;
   const char                *base_url = NULL;
   http_ops_ref              http_ops = http_ops_create();
+  const char								*timing_output = NULL;
   
 #ifdef HAVE_SRANDOMDEV
   srandomdev();
@@ -153,9 +159,32 @@ main(
         is_dry_run = true;
         break;
       
-      case 't':
+      case 't': {
         should_show_timings = true;
+        if ( optarg && *optarg ) {
+        	char			*colon = strchr(optarg, ':');
+        	size_t		format_len;
+        	
+        	if ( colon == NULL ) {
+        		format_len = strlen(colon);
+        	} else {
+        		format_len = colon - optarg;
+        	}
+        	if ( strncasecmp(optarg, "table", format_len) == 0 ) {
+        		stats_format = http_stats_format_table;
+        	} else if ( strncasecmp(optarg, "csv", format_len) == 0 ) {
+        		stats_format = http_stats_format_csv;
+        	} else if ( strncasecmp(optarg, "tsv", format_len) == 0 ) {
+        		stats_format = http_stats_format_tsv;
+        	} else {
+        		fprintf(stderr, "ERROR:  invalid timing output specification: %s\n", optarg);
+        		exit(EINVAL);
+        	}
+        	if ( colon ) timing_output = colon + 1;
+        	break;
+        }
         break;
+      }
       
       case 'g': {
         if ( optarg && *optarg ) {
@@ -205,6 +234,10 @@ main(
         break;
       }
       
+      case 'D':
+        should_delete = false;
+        break;
+      
       case 'u': {
         if ( optarg && *optarg ) {
           if ( ! http_ops_set_username(http_ops, optarg) ) {
@@ -245,6 +278,12 @@ main(
       fs_entity       *e;
       unsigned int    current_generation = 1;
       
+      //
+      // Disable deletion?
+      //
+      fs_entity_list_set_state_is_enabled(fslist, fs_entity_state_delete, should_delete);
+      fs_entity_list_set_state_is_enabled(fslist, fs_entity_state_delete_sub, should_delete);
+      
       if ( should_show_file_list ) fs_entity_list_print(print_format | print_charset, fslist);
       
       if ( is_verbose ) {
@@ -267,22 +306,22 @@ main(
               case fs_entity_kind_directory: {
                 switch ( e->state ) {
                   case fs_entity_state_upload: {
-                    ok = http_ops_mkdir(http_ops, url, e->http_stats, &http_status);
+                    ok = http_ops_mkdir(http_ops, url, e->http_stats[http_ops_method_mkcol], &http_status);
                     break;
                   }
                   
                   case fs_entity_state_getinfo: {
-                    ok = http_ops_getinfo(http_ops, url, e->http_stats, &http_status);
+                    ok = http_ops_getinfo(http_ops, url, e->http_stats[http_ops_method_propfind], &http_status);
                     break;
                   }
                   
                   case fs_entity_state_download: {
-                    ok = http_ops_download(http_ops, url, NULL, e->http_stats, &http_status);
+                    ok = http_ops_download(http_ops, url, NULL, e->http_stats[http_ops_method_get], &http_status);
                     break;
                   }
                   
                   case fs_entity_state_delete: {
-                    ok = http_ops_delete(http_ops, url, e->http_stats, &http_status);
+                    ok = http_ops_delete(http_ops, url, e->http_stats[http_ops_method_delete], &http_status);
                     break;
                   }
                   
@@ -299,22 +338,22 @@ main(
               case fs_entity_kind_file: {
                 switch ( e->state ) {
                   case fs_entity_state_upload: {
-                    ok = http_ops_upload(http_ops, e->path, url, e->http_stats, &http_status);
+                    ok = http_ops_upload(http_ops, e->path, url, e->http_stats[http_ops_method_put], &http_status);
                     break;
                   }
                   
                   case fs_entity_state_getinfo: {
-                    ok = http_ops_getinfo(http_ops, url, e->http_stats, &http_status);
+                    ok = http_ops_getinfo(http_ops, url, e->http_stats[http_ops_method_propfind], &http_status);
                     break;
                   }
                   
                   case fs_entity_state_download: {
-                    ok = http_ops_download(http_ops, url, NULL, e->http_stats, &http_status);
+                    ok = http_ops_download(http_ops, url, NULL, e->http_stats[http_ops_method_get], &http_status);
                     break;
                   }
                   
                   case fs_entity_state_delete: {
-                    ok = http_ops_delete(http_ops, url, e->http_stats, &http_status);
+                    ok = http_ops_delete(http_ops, url, e->http_stats[http_ops_method_delete], &http_status);
                     break;
                   }
                   
@@ -341,19 +380,31 @@ main(
               }
             }
             free((void*)url);
-            if ( ok ) fs_entity_advance_state(e);
+            if ( ok ) fs_entity_list_advance_entity_state(fslist, e);
           }
         } else {
           if ( print_format ) fs_entity_print(print_format | print_charset, e);
-          fs_entity_advance_state(e);
+          fs_entity_list_advance_entity_state(fslist, e);
         }
       }
       if ( is_verbose ) {
         printf("Generation %u completed\n", current_generation);
       }
-      if ( ! is_dry_run && should_show_timings && print_format ) {
-        printf("\nTiming information:\n\n");
-        fs_entity_list_stats_print(print_format | print_charset, fslist);
+      if ( ! is_dry_run && should_show_timings ) {
+				if ( ! timing_output ) {
+					printf("\nTiming information:\n\n");
+        	fs_entity_list_stats_print(stats_format, http_stats_print_flags_none, fslist);
+        } else {
+        	FILE			*timing_fptr = fopen(timing_output, "w");
+        	
+        	if ( timing_fptr ) {
+        		fs_entity_list_stats_fprint(timing_fptr, stats_format, http_stats_print_flags_none, fslist);
+        		fclose(timing_fptr);
+        	} else {
+        		fprintf(stderr, "ERROR:  unable to open timing file for writing: %s\n", timing_output);
+        		rc = errno;
+        	}
+        }
       }
       fs_entity_list_destroy(fslist);
     }
