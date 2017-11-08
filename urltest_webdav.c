@@ -43,10 +43,11 @@ static const struct option urltest_webdav_options[] = {
     { "no-delete",        no_argument,          NULL,       'D' },
     { "username",         required_argument,    NULL,       'u' },
     { "password",         required_argument,    NULL,       'p' },
+    { "no-cert-verify",   no_argument,          NULL,       'k' },
     { NULL,               0,                    NULL,        0  }
   };
 
-static const char *urltest_webdav_optstring = "h" "lsna" "dvtg:" "U:m:Du:p:";
+static const char *urltest_webdav_optstring = "h" "lsna" "dvtg:" "U:m:Du:p:k";
 
 //
 
@@ -92,6 +93,8 @@ usage(
       "                               the username\n"
       "  --password/-p <string>       use HTTP basic authentication with the given string as\n"
       "                               the password\n"
+      "  --no-cert-verify/-k          do not require SSL certificate verfication for connections\n"
+      "                               to succeed\n"
       "\n",
       urltest_webdav_version_string,
       exe
@@ -333,6 +336,10 @@ main(
         }
         break;
       }
+      
+      case 'k':
+        http_ops_set_ssl_verify_peer(http_ops, false);
+        break;
       
     }
   }

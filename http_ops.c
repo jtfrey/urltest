@@ -119,6 +119,7 @@ typedef enum {
 typedef struct _http_ops {
   struct curl_slist   *resolve_list, *propfind_headers;
   const char          *username, *password;
+  bool                should_verify_peer;
   char                curl_error_buffer[CURL_ERROR_SIZE];
 } http_ops;
 
@@ -141,6 +142,7 @@ __http_ops_get_curl_request(
       if ( ops->password ) {
         curl_easy_setopt(new_request, CURLOPT_PASSWORD, ops->password);
       }
+      curl_easy_setopt(new_request, CURLOPT_SSL_VERIFYPEER, (ops->should_verify_peer ? 1L : 0L));
     }
     
     //
@@ -235,6 +237,27 @@ http_ops_get_error_buffer(
 )
 {
   return (const char*)&ops->curl_error_buffer[0];
+}
+
+//
+
+bool
+http_ops_get_ssl_verify_peer(
+  http_ops_ref  ops
+)
+{
+  return ops->should_verify_peer;
+}
+
+//
+
+void
+http_ops_set_ssl_verify_peer(
+  http_ops_ref  ops,
+  bool          should_verify_peer
+)
+{
+  ops->should_verify_peer = should_verify_peer;
 }
 
 //

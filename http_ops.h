@@ -26,6 +26,9 @@ void http_ops_destroy(http_ops_ref ops);
 
 const char* http_ops_get_error_buffer(http_ops_ref ops);
 
+bool http_ops_get_ssl_verify_peer(http_ops_ref ops);
+void http_ops_set_ssl_verify_peer(http_ops_ref ops, bool should_verify_peer);
+
 const char* http_ops_get_username(http_ops_ref ops);
 bool http_ops_set_username(http_ops_ref ops, const char *username);
 
