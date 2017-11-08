@@ -82,7 +82,7 @@ CHECK_INCLUDE_FILES(unistd.h HAVE_UNISTD_H)
 # The executable:
 #
 CONFIGURE_FILE(config.h.in config.h)
-INCLUDE_DIRECTORIES(${CMAKE_CURRENT_BINARY_DIR})
 ADD_EXECUTABLE(urltest_webdav fs_entity.c http_ops.c http_stats.c util_fns.c urltest_webdav.c)
+TARGET_INCLUDE_DIRECTORIES(urltest_webdav PUBLIC ${CMAKE_CURRENT_BINARY_DIR} ${LIBCURL_INCLUDE_DIRS})
 TARGET_LINK_LIBRARIES(urltest_webdav -lm ${LIBCURL_LIBRARIES})
 

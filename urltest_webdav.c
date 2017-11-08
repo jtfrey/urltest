@@ -189,11 +189,13 @@ main(
   
 #ifdef HAVE_SRANDOMDEV
   srandomdev();
-#elif HAVE_SRANDOM
-  srandom(time(NULL));
 #else
-  srand(time(NULL));
-#endif /* HAVE_SRANDOMDEV, HAVE_SRANDOM */
+# ifdef HAVE_SRANDOM
+    srandom(time(NULL));
+# else
+   srand(time(NULL));
+# endif /* HAVE_SRANDOM */
+#endif /* HAVE_SRANDOMDEV */
 
   optind = 0;
   while ( (opt = getopt_long(argc, argv, urltest_webdav_optstring, urltest_webdav_options, NULL)) != -1 ) {
