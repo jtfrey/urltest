@@ -12,6 +12,7 @@
 
 #include <curl/curl.h>
 
+#include "util_fns.h"
 #include "fs_entity.h"
 #include "http_ops.h"
 
@@ -95,6 +96,73 @@ usage(
       urltest_webdav_version_string,
       exe
     );
+}
+
+//
+
+void
+http_error_exit(
+  long      http_status
+)
+{
+  bool      do_not_exit = false;
+  int       rc = EPERM;
+  
+  switch ( http_status / 100 ) {
+  
+    case 4: {
+      fprintf(stderr, "REQUEST ERROR(%ld): ", http_status);
+      switch ( http_status ) {
+        case 400:
+          fprintf(stderr, "request was not properly constructed\n");
+          rc = EINVAL;
+          break;
+        
+        case 401:
+          fprintf(stderr, "authentication was required and credentials did not work\n");
+          rc = EACCES;
+          break;
+        
+        case 403:
+          fprintf(stderr, "access forbidden by server, unable to proceed further\n");
+          rc = EACCES;
+          break;
+        
+        case 408:
+          fprintf(stderr, "request timed out, will try again\n");
+          do_not_exit = true;
+          break;
+        
+        default:
+          fprintf(stderr, "unable to proceed further\n");
+          break;
+      }
+      break;
+    }
+    
+    case 5: {
+      fprintf(stderr, "SERVER ERROR(%ld): ", http_status);
+      switch ( http_status ) {
+        case 507:
+          fprintf(stderr, "no room left on device\n");
+          rc = ENOSPC;
+          break;
+          
+        case 506:
+        case 508:
+          fprintf(stderr, "referential loop detected\n");
+          rc = ELOOP;
+          break;
+        
+        default:
+          fprintf(stderr, "unable to proceed further\n");
+          break;
+      }
+      break;
+    }
+  
+  }
+  if ( ! do_not_exit ) exit(rc);
 }
 
 //
@@ -277,6 +345,29 @@ main(
     if ( fslist ) {
       fs_entity       *e;
       unsigned int    current_generation = 1;
+      const char      *real_base_url = base_url;
+      
+      //
+      // If the entity is a directory and was specified with a trailing slash, then
+      // append that pathname to the base_url to get our real base URL:
+      //
+      if ( fslist->root_entity->kind == fs_entity_kind_directory ) {
+        const char    *last_char = argv[optind] + strlen(argv[optind]) - 1;
+        
+        if ( *last_char == '/' ) {
+          const char  *slash = last_char - 1;
+          
+          while ( slash >= argv[optind] && (*slash != '/') ) slash--;
+          if ( slash < argv[optind] ) {
+            real_base_url = strmcat(base_url, "/", argv[optind], NULL);
+          } else {
+            real_base_url = strmcat(base_url, slash, NULL);
+          }
+          if ( is_verbose ) {
+            printf("Using modified base URL of %s\n", real_base_url);
+          }
+        }
+      }
       
       //
       // Disable deletion?
@@ -295,7 +386,7 @@ main(
           printf("Generation %u completed\n", current_generation++);
         }
         if ( ! is_dry_run ) {
-          const char  *url = fs_entity_list_url_for_entity(fslist, base_url, e);
+          const char  *url = fs_entity_list_url_for_entity(fslist, real_base_url, e);
           
           if ( url ) {
             bool      ok = false;
@@ -307,21 +398,69 @@ main(
                 switch ( e->state ) {
                   case fs_entity_state_upload: {
                     ok = http_ops_mkdir(http_ops, url, e->http_stats[http_ops_method_mkcol], &http_status);
+                    if ( ok ) {
+                      switch ( http_status / 100 ) {
+                      
+                        case 4:
+                          if ( http_status == 405 ) {
+                            // Directory already exists, that's okay:
+                            break;
+                          }
+                        case 5:
+                          http_error_exit(http_status);
+                          ok = false;
+                          break;
+                          
+                      }
+                    }
                     break;
                   }
                   
                   case fs_entity_state_getinfo: {
                     ok = http_ops_getinfo(http_ops, url, e->http_stats[http_ops_method_propfind], &http_status);
+                    if ( ok ) {
+                      switch ( http_status / 100 ) {
+                      
+                        case 4:
+                        case 5:
+                          http_error_exit(http_status);
+                          ok = false;
+                          break;
+                          
+                      }
+                    }
                     break;
                   }
                   
                   case fs_entity_state_download: {
                     ok = http_ops_download(http_ops, url, NULL, e->http_stats[http_ops_method_get], &http_status);
+                    if ( ok ) {
+                      switch ( http_status / 100 ) {
+                      
+                        case 4:
+                        case 5:
+                          http_error_exit(http_status);
+                          ok = false;
+                          break;
+                          
+                      }
+                    }
                     break;
                   }
                   
                   case fs_entity_state_delete: {
                     ok = http_ops_delete(http_ops, url, e->http_stats[http_ops_method_delete], &http_status);
+                    if ( ok ) {
+                      switch ( http_status / 100 ) {
+                      
+                        case 4:
+                        case 5:
+                          http_error_exit(http_status);
+                          ok = false;
+                          break;
+                          
+                      }
+                    }
                     break;
                   }
                   
@@ -329,7 +468,8 @@ main(
                   case fs_entity_state_upload_sub:
                   case fs_entity_state_delete_sub:
                   case fs_entity_state_max:
-                    // Just to please the compilers that want complete enumeration coverage:
+                    fprintf(stderr, "CATASTOPHIC ERROR:  directory state flow should not reach this state!!\n");
+                    exit(EINVAL);
                     break;
                 }
                 break;
@@ -339,21 +479,65 @@ main(
                 switch ( e->state ) {
                   case fs_entity_state_upload: {
                     ok = http_ops_upload(http_ops, e->path, url, e->http_stats[http_ops_method_put], &http_status);
+                    if ( ok ) {
+                      switch ( http_status / 100 ) {
+                      
+                        case 4:
+                        case 5:
+                          http_error_exit(http_status);
+                          ok = false;
+                          break;
+                          
+                      }
+                    }
                     break;
                   }
                   
                   case fs_entity_state_getinfo: {
                     ok = http_ops_getinfo(http_ops, url, e->http_stats[http_ops_method_propfind], &http_status);
+                    if ( ok ) {
+                      switch ( http_status / 100 ) {
+                      
+                        case 4:
+                        case 5:
+                          http_error_exit(http_status);
+                          ok = false;
+                          break;
+                          
+                      }
+                    }
                     break;
                   }
                   
                   case fs_entity_state_download: {
                     ok = http_ops_download(http_ops, url, NULL, e->http_stats[http_ops_method_get], &http_status);
+                    if ( ok ) {
+                      switch ( http_status / 100 ) {
+                      
+                        case 4:
+                        case 5:
+                          http_error_exit(http_status);
+                          ok = false;
+                          break;
+                          
+                      }
+                    }
                     break;
                   }
                   
                   case fs_entity_state_delete: {
                     ok = http_ops_delete(http_ops, url, e->http_stats[http_ops_method_delete], &http_status);
+                    if ( ok ) {
+                      switch ( http_status / 100 ) {
+                      
+                        case 4:
+                        case 5:
+                          http_error_exit(http_status);
+                          ok = false;
+                          break;
+                          
+                      }
+                    }
                     break;
                   }
                   
@@ -361,7 +545,8 @@ main(
                   case fs_entity_state_download_sub:
                   case fs_entity_state_delete_sub:
                   case fs_entity_state_max:
-                    // Just to please the compilers that want complete enumeration coverage:
+                    fprintf(stderr, "CATASTOPHIC ERROR:  file state flow should not reach this state!!\n");
+                    exit(EINVAL);
                     break;
                 }
                 break;
@@ -381,6 +566,9 @@ main(
             }
             free((void*)url);
             if ( ok ) fs_entity_list_advance_entity_state(fslist, e);
+          } else {
+            fprintf(stderr, "CATASTROPHIC ERROR:  unable to generate URL for %s (errno = %d)\n", e->path, errno);
+            exit(errno);
           }
         } else {
           if ( print_format ) fs_entity_print(print_format | print_charset, e);
@@ -407,9 +595,9 @@ main(
         }
       }
       fs_entity_list_destroy(fslist);
+      if ( real_base_url != base_url ) free((void*)real_base_url);
     }
     optind++;
   }
-  
   return rc;
 }
