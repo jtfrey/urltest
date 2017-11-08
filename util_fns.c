@@ -30,11 +30,12 @@ strmcat(
     s = s1;
     va_start(argv, s1);
     do {
-      char    *next = stpncpy(dst, s, rem_len);
-      
-      rem_len -= (next - dst) - 1;
-      dst = next;
-    } while ( (s = va_arg(argv, const char*)) );
+      while ( rem_len && *s ) {
+        *dst++ = *s++;
+        rem_len--;
+      }
+      *dst = '\0';
+    } while ( rem_len && (s = va_arg(argv, const char*)) );
     va_end(argv);
     
     return out_str;
@@ -70,17 +71,20 @@ strmcatd(
     s = s1;
     va_start(argv, s1);
     do {
-      char    *next;
-      
       // Add delimiter?
       if ( s != s1 ) {
-        next = stpncpy(dst, delim, rem_len);
-        rem_len -= (next - dst) - 1;
-        dst = next;
+        const char  *d = delim;
+        
+        while ( rem_len && *d ) {
+          *dst++ = *d++;
+          rem_len--;
+        }
       }
-      next = stpncpy(dst, s, rem_len);
-      rem_len -= (next - dst) - 1;
-      dst = next;
+      while ( rem_len && *s ) {
+        *dst++ = *s++;
+        rem_len--;
+      }
+      *dst = '\0';
     } while ( (s = va_arg(argv, const char*)) );
     va_end(argv);
     

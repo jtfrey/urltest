@@ -120,6 +120,7 @@ typedef struct _http_ops {
   struct curl_slist   *resolve_list, *propfind_headers;
   const char          *username, *password;
   bool                should_verify_peer;
+  CURL*               request_objs[http_ops_curl_request_max];
   char                curl_error_buffer[CURL_ERROR_SIZE];
 } http_ops;
 
@@ -131,8 +132,14 @@ __http_ops_get_curl_request(
   http_ops_curl_request   request
 )
 {
-  CURL        *new_request = curl_easy_init();
+  CURL        *new_request = NULL;
   
+  if ( ops->request_objs[request] ) {
+    new_request = ops->request_objs[request];
+    curl_easy_reset(new_request);
+  } else {
+    ops->request_objs[request] = new_request = curl_easy_init();
+  }
   if ( new_request ) {
     curl_easy_setopt(new_request, CURLOPT_ERRORBUFFER, &ops->curl_error_buffer[0]);
     if ( ops->resolve_list ) curl_easy_setopt(new_request, CURLOPT_RESOLVE, ops->resolve_list);
@@ -222,6 +229,9 @@ http_ops_destroy(
 {
   http_ops_curl_request   i_r;
   
+  for ( i_r = http_ops_curl_request_get; i_r < http_ops_curl_request_max; i_r++ ) {
+    if ( ops->request_objs[i_r] ) curl_easy_cleanup(ops->request_objs[i_r]);
+  }
   if ( ops->resolve_list ) curl_slist_free_all(ops->resolve_list);
   if ( ops->propfind_headers ) curl_slist_free_all(ops->propfind_headers);
   if ( ops->username ) free((void*)ops->username);
@@ -376,7 +386,6 @@ http_ops_mkdir(
       http_stats_update(stats, curl_request);
       rc = true;
     }
-    curl_easy_cleanup(curl_request);
   }
   return rc;
 }
@@ -411,7 +420,6 @@ http_ops_upload(
         rc = true;
       }
     }
-    curl_easy_cleanup(curl_request);
   }
   return rc;
 }
@@ -454,7 +462,6 @@ http_ops_download(
       http_stats_update(stats, curl_request);
       rc = true;
     }
-    curl_easy_cleanup(curl_request);
   }
   return rc;
 }
@@ -482,7 +489,6 @@ http_ops_delete(
       http_stats_update(stats, curl_request);
       rc = true;
     }
-    curl_easy_cleanup(curl_request);
   }
   return rc;
 }
@@ -511,7 +517,6 @@ http_ops_getinfo(
       http_stats_update(stats, curl_request);
       rc = true;
     }
-    curl_easy_cleanup(curl_request);
   }
   return rc;
 }
