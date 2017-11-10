@@ -14,4 +14,7 @@ char* strmcatd(const char *delim, const char *s1, ...);
 int asprintf(char* *ret, const char *format, ...);
 #endif /* HAVE_ASPRINTF */
 
+long int random_long_int();
+long int random_long_int_in_range(long int low, long int high);
+
 #endif /* __UTIL_FNS_H__ */

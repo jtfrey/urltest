@@ -22,9 +22,11 @@ typedef enum {
 typedef enum {
   fs_entity_state_upload = 0,
   fs_entity_state_upload_sub,
+  fs_entity_state_options,
   fs_entity_state_getinfo,
   fs_entity_state_download_sub,
   fs_entity_state_download,
+  fs_entity_state_download_range,
   fs_entity_state_delete_sub,
   fs_entity_state_delete,
   //
@@ -82,6 +84,7 @@ void fs_entity_fprint(FILE *fptr, fs_entity_print_format format, fs_entity *enti
 void fs_entity_list_print(fs_entity_print_format format, fs_entity_list *the_list);
 void fs_entity_list_fprint(FILE *fptr, fs_entity_print_format format, fs_entity_list *the_list);
 
+fs_entity* fs_entity_list_next_node(fs_entity_list *the_list, unsigned int max_generation);
 fs_entity* fs_entity_list_random_node(fs_entity_list *the_list, unsigned int max_generation);
 
 bool fs_entity_list_get_state_is_enabled(fs_entity_list *the_list, fs_entity_state state);

@@ -129,6 +129,58 @@ asprintf(
 #endif /* HAVE_ASPRINTF */
 
 //
+
+long int
+random_long_int()
+{
+#ifdef HAVE_RANDOM
+  return random();
+#else
+  if ( sizeof(long int) < sizeof(int) ) {
+    long int  n;
+    int       i = 0, iMax = (sizeof(long int) / sizeof(int));
+    int       *p = (int*)&n;
+    
+    while ( i++ < iMax ) {
+      *p++ = rand();
+    }
+    return n;
+  }
+  return rand();
+#endif
+}
+
+//
+
+long int
+random_long_int_in_range(
+  long int    low,
+  long int    high
+)
+{
+  long        n;
+  
+  if ( low == high ) return low;
+
+#ifdef HAVE_RANDOM
+  n = random();
+#else
+  if ( sizeof(long int) == sizeof(int) ) {
+    n = rand();
+  } else {
+    int       i = 0, iMax = (sizeof(long int) / sizeof(int));
+    int       *p = (int*)&n;
+    
+    while ( i++ < iMax ) {
+      *p++ = rand();
+    }
+  }
+#endif
+
+  return low + (n % (high - low + 1));
+}
+
+//
 #ifdef UTIL_FNS_TEST
 
 #include <stdio.h>

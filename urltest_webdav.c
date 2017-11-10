@@ -34,6 +34,7 @@ static const struct option urltest_webdav_options[] = {
     { "ascii",            no_argument,          NULL,       'a' },
     //
     { "verbose",          no_argument,          NULL,       'v' },
+    { "verbose-curl",     no_argument,          NULL,       'V' },
     { "dry-run",          no_argument,          NULL,       'd' },
     { "show-timings",     optional_argument,    NULL,       't' },
     { "generations",      required_argument,    NULL,       'g' },
@@ -44,10 +45,13 @@ static const struct option urltest_webdav_options[] = {
     { "username",         required_argument,    NULL,       'u' },
     { "password",         required_argument,    NULL,       'p' },
     { "no-cert-verify",   no_argument,          NULL,       'k' },
+    { "no-random-walk",   no_argument,          NULL,       'W' },
+    { "ranged-ops",       no_argument,          NULL,       'r' },
+    { "no-options",       no_argument,          NULL,       'O' },
     { NULL,               0,                    NULL,        0  }
   };
 
-static const char *urltest_webdav_optstring = "h" "lsna" "dvtg:" "U:m:Du:p:k";
+static const char *urltest_webdav_optstring = "h" "lsna" "vVdtg:" "U:m:Du:p:kWrO";
 
 //
 
@@ -73,9 +77,12 @@ usage(
       "\n"
       "  --verbose/-v                 display additional information to stdout as the\n"
       "                               program progresses\n"
+      "  --verbose-curl/-V            ask cURL to display verbose request progress to\n"
+      "                               stderr\n"
       "  --dry-run/-d                 do not perform any HTTP requests, just show an\n"
       "                               activity trace\n"
-      "  --show-timings/-t <out>      show HTTP timing statistics at the end of the run\n"
+      "  -t                           show HTTP timing statistics as a table to stdout\n"
+      "  --show-timings=<out>         show HTTP timing statistics at the end of the run\n"
       "\n"
       "                                 <out> = <format>{:<path>}\n"
       "                                 <format> = table | csv | tsv\n"
@@ -95,6 +102,9 @@ usage(
       "                               the password\n"
       "  --no-cert-verify/-k          do not require SSL certificate verfication for connections\n"
       "                               to succeed\n"
+      "  --no-random-walk/-W          process the file list as a simple depth-first traversal\n"
+      "  --ranged-ops/-r              enable ranged GET operations\n"
+      "  --no-options/-O              disable OPTIONS operations\n"
       "\n",
       urltest_webdav_version_string,
       exe
@@ -170,6 +180,10 @@ http_error_exit(
 
 //
 
+typedef fs_entity* (*fs_entity_list_node_selector_fn)(fs_entity_list *the_list, unsigned int max_generation);
+
+//
+
 int
 main(
   int               argc,
@@ -182,6 +196,9 @@ main(
   bool                      should_show_file_list = true;
   bool                      should_show_timings = false;
   bool                      should_delete = true;
+  bool                      should_do_random_walk = true;
+  bool                      should_do_ranged_ops = false;
+  bool                      should_do_options = true;
   unsigned int              generations = 1;
   fs_entity_print_format    print_format = fs_entity_print_format_default;
   fs_entity_print_format    print_charset = 0;
@@ -189,16 +206,6 @@ main(
   const char                *base_url = NULL;
   http_ops_ref              http_ops = http_ops_create();
   const char								*timing_output = NULL;
-  
-#ifdef HAVE_SRANDOMDEV
-  srandomdev();
-#else
-# ifdef HAVE_SRANDOM
-    srandom(time(NULL));
-# else
-   srand(time(NULL));
-# endif /* HAVE_SRANDOM */
-#endif /* HAVE_SRANDOMDEV */
 
   optind = 0;
   while ( (opt = getopt_long(argc, argv, urltest_webdav_optstring, urltest_webdav_options, NULL)) != -1 ) {
@@ -224,12 +231,16 @@ main(
         print_charset = fs_entity_print_format_ascii;
         break;
       
+      case 'd':
+        is_dry_run = true;
+        break;
+      
       case 'v':
         is_verbose = true;
         break;
       
-      case 'd':
-        is_dry_run = true;
+      case 'V':
+        http_ops_set_is_verbose(http_ops, true);
         break;
       
       case 't': {
@@ -340,8 +351,32 @@ main(
       case 'k':
         http_ops_set_ssl_verify_peer(http_ops, false);
         break;
+        
+      case 'W':
+        should_do_random_walk = false;
+        break;
+      
+      case 'r':
+        should_do_ranged_ops = true;
+        break;
+      
+      case 'O':
+        should_do_options = false;
+        break;
       
     }
+  }
+  
+  if ( should_do_random_walk ) {
+#ifdef HAVE_SRANDOMDEV
+    srandomdev();
+#else
+# ifdef HAVE_SRANDOM
+    srandom(time(NULL));
+# else
+    srand(time(NULL));
+# endif /* HAVE_SRANDOM */
+#endif /* HAVE_SRANDOMDEV */
   }
   
   if ( is_verbose && base_url ) {
@@ -352,9 +387,10 @@ main(
     fs_entity_list    *fslist = fs_entity_list_create_with_path(argv[optind]);
     
     if ( fslist ) {
-      fs_entity       *e;
-      unsigned int    current_generation = 1;
-      const char      *real_base_url = base_url;
+      fs_entity                           *e;
+      unsigned int                        current_generation = 1;
+      const char                          *real_base_url = base_url;
+      fs_entity_list_node_selector_fn     node_selector = should_do_random_walk ? fs_entity_list_random_node : fs_entity_list_next_node;
       
       //
       // If the entity is a directory and was specified with a trailing slash, then
@@ -384,13 +420,24 @@ main(
       fs_entity_list_set_state_is_enabled(fslist, fs_entity_state_delete, should_delete);
       fs_entity_list_set_state_is_enabled(fslist, fs_entity_state_delete_sub, should_delete);
       
+      //
+      // Enable ranged ops?
+      //
+      fs_entity_list_set_state_is_enabled(fslist, fs_entity_state_download_range, should_do_ranged_ops);
+      
+      //
+      // Disable option method?
+      //
+      fs_entity_list_set_state_is_enabled(fslist, fs_entity_state_options, should_do_options);
+      
+      
       if ( should_show_file_list ) fs_entity_list_print(print_format | print_charset, fslist);
       
       if ( is_verbose ) {
         printf("\nCommencing %u iteration%s...\n", generations, (generations == 1) ? "" : "s");
       }
       
-      while ( (e = fs_entity_list_random_node(fslist, generations)) ) {
+      while ( (e = node_selector(fslist, generations)) ) {
         if ( is_verbose && (fslist->generation == current_generation) ) {
           printf("Generation %u completed\n", current_generation++);
         }
@@ -415,6 +462,22 @@ main(
                             // Directory already exists, that's okay:
                             break;
                           }
+                        case 5:
+                          http_error_exit(http_status);
+                          ok = false;
+                          break;
+                          
+                      }
+                    }
+                    break;
+                  }
+                  
+                  case fs_entity_state_options: {
+                    ok = http_ops_options(http_ops, url, e->http_stats[http_ops_method_options], &http_status);
+                    if ( ok ) {
+                      switch ( http_status / 100 ) {
+                      
+                        case 4:
                         case 5:
                           http_error_exit(http_status);
                           ok = false;
@@ -473,6 +536,7 @@ main(
                     break;
                   }
                   
+                  case fs_entity_state_download_range:
                   case fs_entity_state_download_sub:
                   case fs_entity_state_upload_sub:
                   case fs_entity_state_delete_sub:
@@ -488,6 +552,22 @@ main(
                 switch ( e->state ) {
                   case fs_entity_state_upload: {
                     ok = http_ops_upload(http_ops, e->path, url, e->http_stats[http_ops_method_put], &http_status);
+                    if ( ok ) {
+                      switch ( http_status / 100 ) {
+                      
+                        case 4:
+                        case 5:
+                          http_error_exit(http_status);
+                          ok = false;
+                          break;
+                          
+                      }
+                    }
+                    break;
+                  }
+                  
+                  case fs_entity_state_options: {
+                    ok = http_ops_options(http_ops, url, e->http_stats[http_ops_method_options], &http_status);
                     if ( ok ) {
                       switch ( http_status / 100 ) {
                       
@@ -520,6 +600,22 @@ main(
                   
                   case fs_entity_state_download: {
                     ok = http_ops_download(http_ops, url, NULL, e->http_stats[http_ops_method_get], &http_status);
+                    if ( ok ) {
+                      switch ( http_status / 100 ) {
+                      
+                        case 4:
+                        case 5:
+                          http_error_exit(http_status);
+                          ok = false;
+                          break;
+                          
+                      }
+                    }
+                    break;
+                  }
+                  
+                  case fs_entity_state_download_range: {
+                    ok = http_ops_download_range(http_ops, url, NULL, e->http_stats[http_ops_method_get], &http_status, (long int)e->size);
                     if ( ok ) {
                       switch ( http_status / 100 ) {
                       

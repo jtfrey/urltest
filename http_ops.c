@@ -5,6 +5,9 @@
 #include "http_ops.h"
 #include "util_fns.h"
 
+#include <sys/types.h>
+#include <sys/stat.h>
+
 #include <curl/curl.h>
 
 //
@@ -19,7 +22,8 @@ http_ops_method_get_string(
 																"MKCOL   ",
 																"PUT     ",
 																"DELETE  ",
-																"PROPFIND"
+																"PROPFIND",
+                                "OPTIONS "
 															};
 	if ( the_method >= http_ops_method_get && the_method < http_ops_method_max ) return __http_ops_method_strings[the_method];
 	return NULL;
@@ -36,6 +40,59 @@ __http_ops_null_write(
 )
 {
   return (size * nmemb);
+}
+
+//
+
+typedef struct {
+  FILE      *fptr;
+  long int  s, e, p;
+} http_ops_data_range;
+
+size_t
+__http_ops_range_read(
+  char      *ptr,
+  size_t    size,
+  size_t    nmemb,
+  void      *stream
+)
+{
+  http_ops_data_range *R = (http_ops_data_range*)stream;
+  
+  if ( R->p < R->e ) {
+    size_t  bytes_try = (R->e - R->p + 1);
+    size_t  bytes_read;
+    
+    if ( bytes_try > (size * nmemb) ) bytes_try = size * nmemb;
+    bytes_read = fread(ptr, bytes_try, 1, R->fptr);
+    if ( bytes_read < bytes_try ) return CURL_READFUNC_ABORT;
+    R->p += bytes_read;
+    return bytes_read;
+  }
+  return 0;
+}
+
+size_t
+__http_ops_range_write(
+  char      *ptr,
+  size_t    size,
+  size_t    nmemb,
+  void      *userdata
+)
+{
+  http_ops_data_range *R = (http_ops_data_range*)userdata;
+  
+  if ( R->p < R->e ) {
+    size_t  bytes_try = (R->e - R->p + 1);
+    size_t  bytes_wrote;
+    
+    if ( bytes_try > (size * nmemb) ) bytes_try = size * nmemb;
+    bytes_wrote = fwrite(ptr, bytes_try, 1, R->fptr);
+    if ( bytes_wrote < bytes_try ) return CURL_READFUNC_ABORT;
+    R->p += bytes_wrote;
+    return bytes_wrote;
+  }
+  return 0;
 }
 
 //
@@ -110,6 +167,7 @@ typedef enum {
   http_ops_curl_request_delete,
   http_ops_curl_request_mkcol,
   http_ops_curl_request_propfind,
+  http_ops_curl_request_options,
   //
   http_ops_curl_request_max
 } http_ops_curl_request;
@@ -117,12 +175,28 @@ typedef enum {
 //
 
 typedef struct _http_ops {
-  struct curl_slist   *resolve_list, *propfind_headers;
+  bool                is_verbose;
+  struct curl_slist   *resolve_list;
   const char          *username, *password;
   bool                should_verify_peer;
   CURL*               request_objs[http_ops_curl_request_max];
+  struct curl_slist*  request_headers[http_ops_curl_request_max];
   char                curl_error_buffer[CURL_ERROR_SIZE];
 } http_ops;
+
+//
+
+bool
+__http_ops_add_header(
+  http_ops                *ops,
+  http_ops_curl_request   request,
+  const char              *header
+)
+{
+  ops->request_headers[request] = curl_slist_append(ops->request_headers[request], header);
+  
+  return (ops->request_headers[request] != NULL) ? true : false;
+}
 
 //
 
@@ -137,10 +211,24 @@ __http_ops_get_curl_request(
   if ( ops->request_objs[request] ) {
     new_request = ops->request_objs[request];
     curl_easy_reset(new_request);
+    
+    // Dispose of the cached request headers?
+    if ( ops->request_headers[request] ) {
+      switch ( request ) {
+        case http_ops_curl_request_get:
+        case http_ops_curl_request_put: {
+          curl_slist_free_all(ops->request_headers[request]);
+          ops->request_headers[request] = NULL;
+        }
+        default:
+          break;
+      }
+    }
   } else {
     ops->request_objs[request] = new_request = curl_easy_init();
   }
   if ( new_request ) {
+    curl_easy_setopt(new_request, CURLOPT_VERBOSE, ops->is_verbose ? 1L : 0L);
     curl_easy_setopt(new_request, CURLOPT_ERRORBUFFER, &ops->curl_error_buffer[0]);
     if ( ops->resolve_list ) curl_easy_setopt(new_request, CURLOPT_RESOLVE, ops->resolve_list);
     if ( ops->username ) {
@@ -188,15 +276,24 @@ __http_ops_get_curl_request(
       
       case http_ops_curl_request_propfind:
         curl_easy_setopt(new_request, CURLOPT_CUSTOMREQUEST, "PROPFIND");
-        ops->propfind_headers = curl_slist_append(NULL, "Content-type: text/xml");
-        ops->propfind_headers = curl_slist_append(ops->propfind_headers, "Depth: 0");
-        ops->propfind_headers = curl_slist_append(ops->propfind_headers, "Translate: f");
-        curl_easy_setopt(new_request, CURLOPT_HTTPHEADER, ops->propfind_headers);
+        if ( ! ops->request_headers[request] ) {
+          __http_ops_add_header(ops, request, "Content-type: text/xml");
+          __http_ops_add_header(ops, request, "Depth: 0");
+          __http_ops_add_header(ops, request, "Translate: f");
+        }
+        curl_easy_setopt(new_request, CURLOPT_HTTPHEADER, ops->request_headers[request]);
         curl_easy_setopt(new_request, CURLOPT_READFUNCTION, __http_ops_propfind_read);
         curl_easy_setopt(new_request, CURLOPT_READDATA, NULL);
         curl_easy_setopt(new_request, CURLOPT_WRITEFUNCTION, __http_ops_null_write);
         curl_easy_setopt(new_request, CURLOPT_WRITEDATA, NULL);
         break;
+      
+      case http_ops_curl_request_options:
+        curl_easy_setopt(new_request, CURLOPT_CUSTOMREQUEST, "OPTIONS");
+        curl_easy_setopt(new_request, CURLOPT_READFUNCTION, __http_ops_null_read);
+        curl_easy_setopt(new_request, CURLOPT_READDATA, NULL);
+        curl_easy_setopt(new_request, CURLOPT_WRITEFUNCTION, __http_ops_null_write);
+        curl_easy_setopt(new_request, CURLOPT_WRITEDATA, NULL);
       
       case http_ops_curl_request_max:
         break;
@@ -231,9 +328,9 @@ http_ops_destroy(
   
   for ( i_r = http_ops_curl_request_get; i_r < http_ops_curl_request_max; i_r++ ) {
     if ( ops->request_objs[i_r] ) curl_easy_cleanup(ops->request_objs[i_r]);
+    if ( ops->request_headers[i_r] ) curl_slist_free_all(ops->request_headers[i_r]);
   }
   if ( ops->resolve_list ) curl_slist_free_all(ops->resolve_list);
-  if ( ops->propfind_headers ) curl_slist_free_all(ops->propfind_headers);
   if ( ops->username ) free((void*)ops->username);
   if ( ops->password ) free((void*)ops->password);
   free((void*)ops);
@@ -247,6 +344,27 @@ http_ops_get_error_buffer(
 )
 {
   return (const char*)&ops->curl_error_buffer[0];
+}
+
+//
+
+bool
+http_ops_get_is_verbose(
+  http_ops_ref  ops
+)
+{
+  return ops->is_verbose;
+}
+
+//
+
+void
+http_ops_set_is_verbose(
+  http_ops_ref  ops,
+  bool          is_verbose
+)
+{
+  ops->is_verbose = is_verbose;
 }
 
 //
@@ -469,6 +587,72 @@ http_ops_download(
 //
 
 bool
+http_ops_download_range(
+  http_ops_ref    ops,
+  const char      *url,
+  const char      *path,
+  http_stats_ref  stats,
+  long            *http_status,
+  long            expected_length
+)
+{
+  CURL            *curl_request = __http_ops_get_curl_request(ops, http_ops_curl_request_get);
+  bool            rc = false;
+  
+  if ( curl_request ) {
+    CURLcode      ccode = -1;
+    
+    if ( path && *path ) {
+      FILE        *out_file = fopen(path, "a+");
+      
+      if ( out_file ) {
+        char                  header[24 + 32 + 32];
+        http_ops_data_range   write_data;
+        
+        write_data.fptr = out_file;
+        write_data.p = write_data.s = random_long_int_in_range(0, expected_length);
+        
+        if ( fseek(out_file, write_data.s, SEEK_SET) == 0 ) {
+          write_data.e = random_long_int_in_range(write_data.s, expected_length);
+          
+          snprintf(header, sizeof(header), "Range: bytes=%ld-%ld", write_data.s, write_data.e);
+          __http_ops_add_header(ops, http_ops_curl_request_get, header);
+          curl_easy_setopt(curl_request, CURLOPT_HTTPHEADER, ops->request_headers[http_ops_curl_request_get]);
+        
+          
+          curl_easy_setopt(curl_request, CURLOPT_URL, url);
+          curl_easy_setopt(curl_request, CURLOPT_WRITEFUNCTION, __http_ops_range_write);
+          curl_easy_setopt(curl_request, CURLOPT_WRITEDATA, &write_data);
+          ccode = curl_easy_perform(curl_request);
+          fclose(out_file);
+        }
+      }
+    } else {
+      char        header[24 + 32 + 32];
+      long int    s = random_long_int_in_range(0, expected_length);
+      long int    e = random_long_int_in_range(s, expected_length);
+      
+      snprintf(header, sizeof(header), "Range: bytes=%ld-%ld", s, e);
+      __http_ops_add_header(ops, http_ops_curl_request_get, header);
+      curl_easy_setopt(curl_request, CURLOPT_HTTPHEADER, ops->request_headers[http_ops_curl_request_get]);
+      
+      curl_easy_setopt(curl_request, CURLOPT_URL, url);
+      curl_easy_setopt(curl_request, CURLOPT_WRITEFUNCTION, __http_ops_null_write);
+      curl_easy_setopt(curl_request, CURLOPT_WRITEDATA, NULL);
+      ccode = curl_easy_perform(curl_request);
+    }
+    if ( ccode == CURLE_OK ) {
+      curl_easy_getinfo(curl_request, CURLINFO_RESPONSE_CODE, http_status);
+      http_stats_update(stats, curl_request);
+      rc = true;
+    }
+  }
+  return rc;
+}
+
+//
+
+bool
 http_ops_delete(
   http_ops_ref    ops,
   const char      *url,
@@ -510,6 +694,33 @@ http_ops_getinfo(
     CURLcode      ccode;
     
     __http_ops_propfind_read_data_reset();
+    curl_easy_setopt(curl_request, CURLOPT_URL, url);
+    ccode = curl_easy_perform(curl_request);
+    if ( ccode == CURLE_OK ) {
+      curl_easy_getinfo(curl_request, CURLINFO_RESPONSE_CODE, http_status);
+      http_stats_update(stats, curl_request);
+      rc = true;
+    }
+  }
+  return rc;
+}
+
+//
+
+bool
+http_ops_options(
+  http_ops_ref    ops,
+  const char      *url,
+  http_stats_ref  stats,
+  long            *http_status
+)
+{
+  CURL            *curl_request = __http_ops_get_curl_request(ops, http_ops_curl_request_options);
+  bool            rc = false;
+  
+  if ( curl_request ) {
+    CURLcode      ccode;
+    
     curl_easy_setopt(curl_request, CURLOPT_URL, url);
     ccode = curl_easy_perform(curl_request);
     if ( ccode == CURLE_OK ) {

@@ -12,14 +12,6 @@
 
 //
 
-#ifdef HAVE_RANDOM
-# define FS_ENTITY_RANDOM_NUMBER   random
-#else
-# define FS_ENTITY_RANDOM_NUMBER   rand
-#endif /* HAVE_RANDOM */
-
-//
-
 const char*
 __fs_entity_kind_to_token(
   fs_entity_print_format  format,
@@ -53,8 +45,8 @@ __fs_entity_state_to_token(
   fs_entity_state         state
 )
 {
-  static const char*    ascii_state_str[] = { "U", "u", "I", "d", "D", "x", "X", "#" };
-  static const char*    utf8_state_str[] = { "↑", "⇡", "ℹ", "⇣", "↓", "✕", "✖︎", "#" };
+  static const char*    ascii_state_str[] = { "U", "u", "o", "I", "d", "D", "R", "x", "X", "#" };
+  static const char*    utf8_state_str[] = { "↑", "⇡", "…", "ℹ", "⇣", "↓", "⇟", "✕", "✖︎", "#" };
   
   if ( (format & fs_entity_print_format_ascii) == fs_entity_print_format_ascii ) return ascii_state_str[state];
   return utf8_state_str[state];
@@ -217,7 +209,7 @@ fs_entity_list_create_with_path(
     if ( the_list ) {
       the_list->count             = count;
       the_list->generation        = 0;
-      the_list->disabled_states   = 0;
+      the_list->disabled_states   = (1 << fs_entity_state_download_range);
       the_list->root_entity       = root_entity;
       the_list->base_path         = base_path;
     }
@@ -419,6 +411,10 @@ try_again:
           break;
       
         case fs_entity_state_upload_sub:
+          root_entity->state = fs_entity_state_options;
+          break;
+        
+        case fs_entity_state_options:
           root_entity->state = fs_entity_state_getinfo;
           break;
           
@@ -443,6 +439,7 @@ try_again:
           root_entity->state = fs_entity_state_upload;
           break;
       
+        case fs_entity_state_download_range:
         case fs_entity_state_max:
           break;
       
@@ -453,6 +450,10 @@ try_again:
       switch ( root_entity->state ) {
       
         case fs_entity_state_upload:
+          root_entity->state = fs_entity_state_options;
+          break;
+          
+        case fs_entity_state_options:
           root_entity->state = fs_entity_state_getinfo;
           break;
           
@@ -461,6 +462,10 @@ try_again:
           break;
         
         case fs_entity_state_download:
+          root_entity->state = fs_entity_state_download_range;
+          break;
+        
+        case fs_entity_state_download_range:
           root_entity->state = fs_entity_state_delete;
           break;
         
@@ -500,6 +505,111 @@ try_again:
 //
 
 fs_entity*
+__fs_entity_next_node(
+  fs_entity_list  *the_list,
+  fs_entity       *root_entity,
+  unsigned int    generation
+)
+{
+  fs_entity     *e;
+  fs_entity     *node = NULL;
+  unsigned int  n = 0;
+  unsigned int  min_gen = generation;
+  unsigned int  iteration = 0;
+  
+  e = root_entity;
+  while ( e ) {
+    n++;
+    if ( e->generation < min_gen ) min_gen = e->generation;
+    e = e->sibling;
+  }
+  
+  // Everything in this row is current generation.
+  if ( min_gen == generation ) return NULL;
+  
+  e = root_entity;
+  while ( e ) {
+    if ( e->generation < generation ) {
+      switch ( e->kind ) {
+      
+        case fs_entity_kind_directory: {
+          //
+          // For directories in a *_sub state, first try for a child element:
+          //
+          switch ( e->state ) {
+          
+            case fs_entity_state_upload_sub:
+            case fs_entity_state_download_sub:
+            case fs_entity_state_delete_sub: {
+              node = __fs_entity_next_node(the_list, e->child, generation);
+              //
+              // If nothing was returned, then the child chain has completed and
+              // this node can step forward and be returned:
+              //
+              if ( ! node ) {
+                fs_entity_list_advance_entity_state(the_list, e);
+                // If the state advanced into the fs_entity_state_download_sub state 
+                // (from fs_entity_state_upload_sub) and no children were waiting to
+                // change state then it's implied that theres nothing to download
+                // anyway, so advance again: 
+                if ( e->state == fs_entity_state_download_sub ) fs_entity_list_advance_entity_state(the_list, e);
+                node = e;
+              }
+              return node;
+            }
+            
+            default:
+              return e;
+          
+          }
+          break;
+        }
+        
+        case fs_entity_kind_file:
+          return e;
+      
+        case fs_entity_kind_max:
+          break;
+      }
+    }
+    e = e->sibling;
+    
+    if ( ! e ) {
+      iteration++;
+      e = root_entity;
+    }
+  }
+  
+  // Should never get here:
+  return NULL;
+}
+
+//
+
+fs_entity*
+fs_entity_list_next_node(
+  fs_entity_list  *the_list,
+  unsigned int    max_generation
+)
+{
+  if ( the_list->generation < max_generation ) {
+    //
+    // Calculate the average hit count:
+    //
+    double        avg = fs_entity_generation_average(the_list->root_entity);
+    
+    // If the average is > the generation, increase the generation:
+    if ( avg >= (double)(1 + the_list->generation) ) {
+      the_list->generation++;
+    }
+    if ( the_list->generation < max_generation ) return __fs_entity_next_node(the_list, the_list->root_entity, 1 + the_list->generation);
+  }
+  return NULL;
+}
+
+//
+
+fs_entity*
 __fs_entity_random_node(
   fs_entity_list  *the_list,
   fs_entity       *root_entity,
@@ -528,7 +638,7 @@ __fs_entity_random_node(
       //
       // This node is eligible, should we use it?
       //
-      if ( (iteration == 20) || (FS_ENTITY_RANDOM_NUMBER() % n == 0) ) {
+      if ( (iteration == 20) || (random_long_int() % n == 0) ) {
         switch ( e->kind ) {
         
           case fs_entity_kind_directory: {
