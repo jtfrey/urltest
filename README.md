@@ -124,10 +124,10 @@ Command line options are present to alter the verbosity of the program, provide 
 ~~~~
 $ ./urltest_webdav -h
 version 1.0.0
-built Nov  2 2017 16:59:21
+built Nov 10 2017 16:48:10
 usage:
 
-  ./urltest_webdav {options} <file/directory> {<file/directory> ..}
+  ./urltest_webdav {options} <directory> {<directory> ..}
 
  options:
 
@@ -142,9 +142,16 @@ usage:
 
   --verbose/-v                 display additional information to stdout as the
                                program progresses
+  --verbose-curl/-V            ask cURL to display verbose request progress to
+                               stderr
   --dry-run/-d                 do not perform any HTTP requests, just show an
                                activity trace
-  --show-timings/-t            show HTTP timing statistics at the end of the run
+  -t                           show HTTP timing statistics as a table to stdout
+  --show-timings=<out>         show HTTP timing statistics at the end of the run
+
+                                 <out> = <format>{:<path>}
+                                 <format> = table | csv | tsv
+
   --generations/-g <#>         maximum number of generations to iterate
 
   --base-url/-U <URL>          the base URL to which the content should be mirrored
@@ -153,9 +160,15 @@ usage:
 
                                  <hostmap> = <hostname>:<port>:<ip address>
 
+  --no-delete/-D               do not delete anything on the remote side
   --username/-u <string>       use HTTP basic authentication with the given string as
                                the username
   --password/-p <string>       use HTTP basic authentication with the given string as
                                the password
+  --no-cert-verify/-k          do not require SSL certificate verfication for connections
+                               to succeed
+  --no-random-walk/-W          process the file list as a simple depth-first traversal
+  --ranged-ops/-r              enable ranged GET operations
+  --no-options/-O              disable OPTIONS operations
 
 ~~~~
