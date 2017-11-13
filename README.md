@@ -176,4 +176,11 @@ usage:
   --ranged-ops/-r              enable ranged GET operations
   --no-options/-O              disable OPTIONS operations
 
+ environment:
+
+   URLTEST_WEBDAV_USER         default user name for HTTP requests; is overridden by
+                               the --username/-u option
+   URLTEST_WEBDAV_PASSWORD     password to use for authenticated HTTP requests; is
+                               overridden by the --password/-p option
+
 ~~~~
