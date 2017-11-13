@@ -41,6 +41,7 @@ typedef struct _fs_entity {
   unsigned int        generation;
   size_t              size;
   fs_entity_state     state;
+  unsigned int        disabled_states;
   http_stats_ref      http_stats[http_ops_method_max];
   
   struct _fs_entity   *sibling, *child;
@@ -80,6 +81,9 @@ typedef enum {
 
 void fs_entity_print(fs_entity_print_format format, fs_entity *entity);
 void fs_entity_fprint(FILE *fptr, fs_entity_print_format format, fs_entity *entity);
+
+bool fs_entity_get_state_is_enabled(fs_entity *entity, fs_entity_state state);
+void fs_entity_set_state_is_enabled(fs_entity *entity, fs_entity_state state, bool is_enabled);
 
 void fs_entity_list_print(fs_entity_print_format format, fs_entity_list *the_list);
 void fs_entity_list_fprint(FILE *fptr, fs_entity_print_format format, fs_entity_list *the_list);

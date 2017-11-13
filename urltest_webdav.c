@@ -64,7 +64,7 @@ usage(
       "version %s\n"
       "built " __DATE__ " " __TIME__ "\n"
       "usage:\n\n"
-      "  %s {options} <directory> {<directory> ..}\n\n"
+      "  %s {options} <entity> {<entity> ..}\n\n"
       " options:\n\n"
       "  --help/-h                    show this information\n"
       "\n"
@@ -89,7 +89,15 @@ usage(
       "\n"
       "  --generations/-g <#>         maximum number of generations to iterate\n"
       "\n"
-      "  --base-url/-U <URL>          the base URL to which the content should be mirrored\n"
+      "  --base-url/-U <remote URL>   the base URL to which the content should be mirrored;\n"
+      "                               if this parameter is omitted then each <entity> must be\n"
+      "                               a pair of values:  the local file/directory and the base\n"
+      "                               URL to which to mirror it:\n"
+      "\n"
+      "                                 <entity> = <file|directory> <remote URL>\n"
+      "\n"
+      "                               if the --base-url/-U option is used, then <entity> is just\n"
+      "                               the <file|directory> portion\n"
       "  --host-mapping/-m <hostmap>  provide a static DNS mapping for a hostname and TCP/IP\n"
       "                               port\n"
       "\n"
@@ -105,7 +113,8 @@ usage(
       "  --no-random-walk/-W          process the file list as a simple depth-first traversal\n"
       "  --ranged-ops/-r              enable ranged GET operations\n"
       "  --no-options/-O              disable OPTIONS operations\n"
-      "\n",
+      "\n"
+      ,
       urltest_webdav_version_string,
       exe
     );
@@ -367,6 +376,11 @@ main(
     }
   }
   
+  if ( optind == argc ) {
+    fprintf(stderr, "ERROR:  no directories/files present to mirror to webdav server; try `%s -h` for help\n", argv[0]);
+    exit(EINVAL);
+  }
+  
   if ( should_do_random_walk ) {
 #ifdef HAVE_SRANDOMDEV
     srandomdev();
@@ -384,13 +398,29 @@ main(
   }
   
   while ( optind < argc ) {
-    fs_entity_list    *fslist = fs_entity_list_create_with_path(argv[optind]);
+    int                                   delta_optind = 1;
+    fs_entity_list                        *fslist = fs_entity_list_create_with_path(argv[optind]);
     
     if ( fslist ) {
       fs_entity                           *e;
       unsigned int                        current_generation = 1;
       const char                          *real_base_url = base_url;
+      bool                                is_local_real_base_url = false;
       fs_entity_list_node_selector_fn     node_selector = should_do_random_walk ? fs_entity_list_random_node : fs_entity_list_next_node;
+      
+      //
+      // If base URL is NULL, then there must be a URL on the argument list:
+      //
+      if ( ! base_url ) {
+        if ( optind + 1 < argc ) {
+          real_base_url = strdup(argv[optind + 1]);
+          is_local_real_base_url = true;
+          delta_optind = 2;
+        } else {
+          fprintf(stderr, "ERROR:  no base URL provided with file/directory `%s`\n", argv[optind]);
+          exit(EINVAL);
+        }
+      }
       
       //
       // If the entity is a directory and was specified with a trailing slash, then
@@ -404,10 +434,13 @@ main(
           
           while ( slash >= argv[optind] && (*slash != '/') ) slash--;
           if ( slash < argv[optind] ) {
-            real_base_url = strmcat(base_url, "/", argv[optind], NULL);
+            slash = strmcat(real_base_url, "/", argv[optind], NULL);
           } else {
-            real_base_url = strmcat(base_url, slash, NULL);
+            slash = strmcat(real_base_url, slash, NULL);
           }
+          if ( is_local_real_base_url ) free((void*)real_base_url);
+          real_base_url = slash;
+          is_local_real_base_url = true;
           if ( is_verbose ) {
             printf("Using modified base URL of %s\n", real_base_url);
           }
@@ -473,10 +506,32 @@ main(
                   }
                   
                   case fs_entity_state_options: {
-                    ok = http_ops_options(http_ops, url, e->http_stats[http_ops_method_options], &http_status);
+                    bool    has_propfind = false, has_delete = false;
+                    
+                    ok = http_ops_options(http_ops, url, e->http_stats[http_ops_method_options], &http_status, &has_propfind, &has_delete);
                     if ( ok ) {
                       switch ( http_status / 100 ) {
-                      
+                        case 2:
+                          if ( ! has_propfind ) {
+                            // If this was the root entity, then disable in general:
+                            if ( e == fslist->root_entity ) {
+                              fs_entity_list_set_state_is_enabled(fslist, fs_entity_state_getinfo, false);
+                            } else {
+                              fs_entity_set_state_is_enabled(e, fs_entity_state_getinfo, false);
+                            }
+                          }
+                          if ( ! has_delete ) {
+                            // If this was the root entity, then disable in general:
+                            if ( e == fslist->root_entity ) {
+                              fs_entity_list_set_state_is_enabled(fslist, fs_entity_state_delete, false);
+                              fs_entity_list_set_state_is_enabled(fslist, fs_entity_state_delete_sub, false);
+                            } else {
+                              fs_entity_set_state_is_enabled(e, fs_entity_state_delete, false);
+                              fs_entity_set_state_is_enabled(e, fs_entity_state_delete_sub, false);
+                            }
+                          }
+                          break;
+                          
                         case 4:
                         case 5:
                           http_error_exit(http_status);
@@ -554,7 +609,7 @@ main(
                     ok = http_ops_upload(http_ops, e->path, url, e->http_stats[http_ops_method_put], &http_status);
                     if ( ok ) {
                       switch ( http_status / 100 ) {
-                      
+                          
                         case 4:
                         case 5:
                           http_error_exit(http_status);
@@ -567,9 +622,31 @@ main(
                   }
                   
                   case fs_entity_state_options: {
-                    ok = http_ops_options(http_ops, url, e->http_stats[http_ops_method_options], &http_status);
+                    bool    has_propfind = false, has_delete = false;
+                    
+                    ok = http_ops_options(http_ops, url, e->http_stats[http_ops_method_options], &http_status, &has_propfind, &has_delete);
                     if ( ok ) {
                       switch ( http_status / 100 ) {
+                        case 2:
+                          if ( ! has_propfind ) {
+                            // If this was the root entity, then disable in general:
+                            if ( e == fslist->root_entity ) {
+                              fs_entity_list_set_state_is_enabled(fslist, fs_entity_state_getinfo, false);
+                            } else {
+                              fs_entity_set_state_is_enabled(e, fs_entity_state_getinfo, false);
+                            }
+                          }
+                          if ( ! has_delete ) {
+                            // If this was the root entity, then disable in general:
+                            if ( e == fslist->root_entity ) {
+                              fs_entity_list_set_state_is_enabled(fslist, fs_entity_state_delete, false);
+                              fs_entity_list_set_state_is_enabled(fslist, fs_entity_state_delete_sub, false);
+                            } else {
+                              fs_entity_set_state_is_enabled(e, fs_entity_state_delete, false);
+                              fs_entity_set_state_is_enabled(e, fs_entity_state_delete_sub, false);
+                            }
+                          }
+                          break;
                       
                         case 4:
                         case 5:
@@ -700,9 +777,9 @@ main(
         }
       }
       fs_entity_list_destroy(fslist);
-      if ( real_base_url != base_url ) free((void*)real_base_url);
+      if ( is_local_real_base_url ) free((void*)real_base_url);
     }
-    optind++;
+    optind += delta_optind;
   }
   return rc;
 }

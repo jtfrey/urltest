@@ -73,6 +73,7 @@ __fs_entity_create(
       new_entity->generation        = 0;
       new_entity->size              = 0;
       new_entity->state             = fs_entity_state_upload;
+      new_entity->disabled_states   = 0;
       new_entity->sibling           = NULL;
       new_entity->child             = NULL;
       
@@ -335,6 +336,38 @@ fs_entity_print(
 
 //
 
+bool
+fs_entity_get_state_is_enabled(
+  fs_entity         *entity,
+  fs_entity_state   state
+)
+{
+  if ( state >= fs_entity_state_upload && state < fs_entity_state_max ) {
+    return ((1 << state) & entity->disabled_states) ? false : true;
+  }
+  return false;
+}
+
+//
+
+void
+fs_entity_set_state_is_enabled(
+  fs_entity         *entity,
+  fs_entity_state   state,
+  bool              is_enabled
+)
+{
+  if ( state >= fs_entity_state_upload && state < fs_entity_state_max ) {
+    if ( is_enabled ) {
+      entity->disabled_states &= ~(1 << state);
+    } else {
+      entity->disabled_states |= (1 << state);
+    }
+  }
+}
+
+//
+
 void
 __fs_entity_fprint(
   FILE                    *fptr,
@@ -491,7 +524,7 @@ try_again:
   //
   // Skip disabled states...
   //
-  if ( ((1 << root_entity->state) & (the_list->disabled_states)) != 0 ) {
+  if ( (((1 << root_entity->state) & (root_entity->disabled_states)) != 0) || (((1 << root_entity->state) & (the_list->disabled_states)) != 0) ) {
     //
     // ...but only so long as we haven't looped back around to the state
     // when this function was entered!

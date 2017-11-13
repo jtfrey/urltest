@@ -48,6 +48,6 @@ bool http_ops_download(http_ops_ref ops, const char *url, const char *path, http
 bool http_ops_download_range(http_ops_ref ops, const char *url, const char *path, http_stats_ref stats, long *http_status, long expected_length);
 bool http_ops_delete(http_ops_ref ops, const char *url, http_stats_ref stats, long *http_status);
 bool http_ops_getinfo(http_ops_ref ops, const char *url, http_stats_ref stats, long *http_status);
-bool http_ops_options(http_ops_ref ops, const char *url, http_stats_ref stats, long *http_status);
+bool http_ops_options(http_ops_ref ops, const char *url, http_stats_ref stats, long *http_status, bool *has_propfind, bool *has_delete);
 
 #endif /* __HTTP_OPS_H__ */

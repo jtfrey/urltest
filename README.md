@@ -16,118 +16,111 @@ Statistics for the requests are aggregated by:
 - 400-level HTTP status codes
 - 500-level HTTP status codes
 
-The program can process one or more files or directories, mirroring them to a single URL.  For files, the file is:
+The program can process one or more files or directories, mirroring them to a single URL.  For files, the actions are:
 
-1. Uploaded (`PUT`) to the base URL
-2. Checked for properties (`PROPFIND`)
-3. Downloaded (`GET`) from the remove URL (all received data discarded)
-4. Removed (`DELETE`) from the remote URL
+1. Upload (`PUT`) to the remote URL
+2. Issue an HTTP `OPTIONS` request against the remote URL
+3. Retrieve entity properties (`PROPFIND`)
+4. Download (`GET`) from the remote URL (received data is discarded)
+5. Download part of the file (`GET` with a `Range` header) from the remote URL
+6. Remove (`DELETE`) the remote URL
 
 Directories are scanned to produce an in-memory representation that is processed in a semi-random fashion (versus being processed in a fully depth- or breadth-first order).  Files encountered are processed (eventually) in the same sequence as above; for directories the (eventual) sequence is:
 
 1. Create the directory (`MKCOL`) at the remote URL
 2. Upload all child entities
-3. Check for all properties (`PROPFIND`)
-4. Download all child entities
-5. Download (`GET`) from the remove URL (received file listing is discarded)
-6. Remove all child entities
-7. Remove (`DELETE`) at the remote URL
+3. Issue an HTTP `OPTIONS` request against the remote URL
+4. Retrieve directory properties (`PROPFIND`)
+5. Download all child entities
+6. Download (`GET`) from the remote URL (received file listing is discarded)
+7. Remove all child entities
+8. Remove (`DELETE`) the remote URL
 
-This procedure is performed once by default, but can be repeated any number of times.  For example:
+This procedure is performed once by default but can be repeated any number of times.  For example:
 
 ~~~~
-$ ./urltest_webdav -u mud -p 'here is my passw0rd!' -U https://webdav.www.server.org/upload_dir -vnlg2 Makefile
+$ ./urltest_webdav -u mud -p 'here is my passw0rd!' -U https://webdav.www.server.org/upload_dir -vnlg2 sample/
 
 Mirroring content to 'https://webdav.www.server.org/upload_dir'
+WARNING:  directory cycle would result for /home/user/sample/iso/me
+Using modified base URL of https://webdav.www.server.org/upload_dir/sample/
 
-Commencing 1 iteration...
-201 📄 [0000 ↑] 8138     Makefile
-207 📄 [0000 ℹ] 8138     Makefile
-200 📄 [0000 ↓] 8138     Makefile
-204 📄 [0000 ✖︎] 8138     Makefile
+Commencing 2 iterations...
+201 📁 [0000 ↑] 272      /Users/frey/Desktop/sample
+201 📁 [0000 ↑] 204      /Users/frey/Desktop/sample/uvc-util
+201 📄 [0000 ↑] 5266     /Users/frey/Desktop/sample/uvc-util/README.md
+201 📁 [0000 ↑] 102      /Users/frey/Desktop/sample/iso
+201 📁 [0000 ↑] 476      /Users/frey/Desktop/sample/urltest_webdav
+201 📁 [0000 ↑] 442      /Users/frey/Desktop/sample/lmdb
+200 📄 [0000 …] 5266     /Users/frey/Desktop/sample/uvc-util/README.md
+201 📁 [0000 ↑] 306      /Users/frey/Desktop/sample/uvc-util/src
+201 📄 [0000 ↑] 1653     /Users/frey/Desktop/sample/urltest_webdav/http_ops.h
+200 📁 [0000 …] 102      /Users/frey/Desktop/sample/iso
+201 📄 [0000 ↑] 5083     /Users/frey/Desktop/sample/uvc-util/src/UVCValue.m
+  :
+200 📄 [0000 ↓] 462      /Users/frey/Desktop/sample/lmdb/lib/config.h
+200 📄 [0000 ↓] 3161     /Users/frey/Desktop/sample/lmdb/lib/lmlog.c
+204 📄 [0000 ✖︎] 3161     /Users/frey/Desktop/sample/lmdb/lib/lmlog.c
+204 📄 [0000 ✖︎] 13162    /Users/frey/Desktop/sample/lmdb/lib/fscanln.c
+204 📄 [0000 ✖︎] 7019     /Users/frey/Desktop/sample/lmdb/lib/lmfeature.h
+204 📄 [0000 ✖︎] 45060    /Users/frey/Desktop/sample/lmdb/lib/lmdb.c
+204 📄 [0000 ✖︎] 462      /Users/frey/Desktop/sample/lmdb/lib/config.h
+200 📁 [0000 …] 544      /Users/frey/Desktop/sample/lmdb/lib
+207 📁 [0000 ℹ] 544      /Users/frey/Desktop/sample/lmdb/lib
+200 📁 [0000 ↓] 544      /Users/frey/Desktop/sample/lmdb/lib
+204 📁 [0000 ✖︎] 544      /Users/frey/Desktop/sample/lmdb/lib
+200 📁 [0000 …] 442      /Users/frey/Desktop/sample/lmdb
+207 📁 [0000 ℹ] 442      /Users/frey/Desktop/sample/lmdb
+200 📁 [0000 ↓] 442      /Users/frey/Desktop/sample/lmdb
+204 📁 [0000 ✖︎] 442      /Users/frey/Desktop/sample/lmdb
+200 📁 [0000 …] 272      /Users/frey/Desktop/sample
+207 📁 [0000 ℹ] 272      /Users/frey/Desktop/sample
+200 📁 [0000 ↓] 272      /Users/frey/Desktop/sample
+204 📁 [0000 ✖︎] 272      /Users/frey/Desktop/sample
 Generation 1 completed
-201 📄 [0001 ↑] 8138     Makefile
-207 📄 [0001 ℹ] 8138     Makefile
-200 📄 [0001 ↓] 8138     Makefile
-204 📄 [0001 ✖︎] 8138     Makefile
+201 📁 [0001 ↑] 272      /Users/frey/Desktop/sample
+201 📁 [0001 ↑] 442      /Users/frey/Desktop/sample/lmdb
+201 📁 [0001 ↑] 204      /Users/frey/Desktop/sample/lmdb/lmdb_ls
+201 📁 [0001 ↑] 204      /Users/frey/Desktop/sample/uvc-util
+201 📁 [0001 ↑] 170      /Users/frey/Desktop/sample/ud_slurm_addons
+201 📁 [0001 ↑] 170      /Users/frey/Desktop/sample/ud_slurm_addons/job_submit
+  :
+207 📄 [0001 ℹ] 10351    /Users/frey/Desktop/sample/lmdb/lib/lmfeature.c
+200 📄 [0001 ↓] 10351    /Users/frey/Desktop/sample/lmdb/lib/lmfeature.c
+204 📄 [0001 ✖︎] 3161     /Users/frey/Desktop/sample/lmdb/lib/lmlog.c
+204 📄 [0001 ✖︎] 4537     /Users/frey/Desktop/sample/lmdb/lib/util_fns.c
+204 📄 [0001 ✖︎] 4744     /Users/frey/Desktop/sample/lmdb/lib/fscanln.h
+204 📄 [0001 ✖︎] 10351    /Users/frey/Desktop/sample/lmdb/lib/lmfeature.c
+200 📄 [0001 …] 142      /Users/frey/Desktop/sample/lmdb/lib/CMakeLists.txt
+207 📄 [0001 ℹ] 142      /Users/frey/Desktop/sample/lmdb/lib/CMakeLists.txt
+200 📄 [0001 ↓] 142      /Users/frey/Desktop/sample/lmdb/lib/CMakeLists.txt
+204 📄 [0001 ✖︎] 142      /Users/frey/Desktop/sample/lmdb/lib/CMakeLists.txt
+200 📁 [0001 …] 544      /Users/frey/Desktop/sample/lmdb/lib
+207 📁 [0001 ℹ] 544      /Users/frey/Desktop/sample/lmdb/lib
+200 📁 [0001 ↓] 544      /Users/frey/Desktop/sample/lmdb/lib
+204 📁 [0001 ✖︎] 544      /Users/frey/Desktop/sample/lmdb/lib
+200 📁 [0001 …] 442      /Users/frey/Desktop/sample/lmdb
+207 📁 [0001 ℹ] 442      /Users/frey/Desktop/sample/lmdb
+200 📁 [0001 ↓] 442      /Users/frey/Desktop/sample/lmdb
+204 📁 [0001 ✖︎] 442      /Users/frey/Desktop/sample/lmdb
+200 📁 [0001 …] 272      /Users/frey/Desktop/sample
+207 📁 [0001 ℹ] 272      /Users/frey/Desktop/sample
+200 📁 [0001 ↓] 272      /Users/frey/Desktop/sample
+204 📁 [0001 ✖︎] 272      /Users/frey/Desktop/sample
 Generation 2 completed
 ~~~~
 
-Here is an example using this git repository directory itself (lines omitted and a colon shown for brevity):
+Each time this command is repeated, the order of file/directory processing would look different.  The `--no-random-walk/-W` can be used to inhibit this function and reproduce the same order of operations on each invocation.
 
-~~~~
-$ urltest_webdav -u mud -p 'here is my passw0rd!' -U https://webdav.www.server.org/upload_dir/urltest_webdav -vnl /tmp/urltest_webdav
-
-Mirroring content to 'https://webdav.www.udel.edu/www1_farm_webdav/urltest_webdav'
-
-Commencing 1 iteration...
-201 📁 [0000 ↑] 510      /tmp/urltest_webdav
-201 📄 [0000 ↑] 1363     /tmp/urltest_webdav/http_stats.h
-201 📄 [0000 ↑] 17315    /tmp/urltest_webdav/fs_entity.c
-201 📄 [0000 ↑] 2324     /tmp/urltest_webdav/util_fns.c
-207 📄 [0000 ℹ] 2324     /tmp/urltest_webdav/util_fns.c
-207 📄 [0000 ℹ] 1363     /tmp/urltest_webdav/http_stats.h
-201 📄 [0000 ↑] 1266     /tmp/urltest_webdav/http_ops.h
-207 📄 [0000 ℹ] 17315    /tmp/urltest_webdav/fs_entity.c
-201 📄 [0000 ↑] 370      /tmp/urltest_webdav/util_fns.h
-207 📄 [0000 ℹ] 370      /tmp/urltest_webdav/util_fns.h
-207 📄 [0000 ℹ] 1266     /tmp/urltest_webdav/http_ops.h
-201 📄 [0000 ↑] 2856     /tmp/urltest_webdav/fs_entity.h
-200 📄 [0000 ↓] 1363     /tmp/urltest_webdav/http_stats.h
-200 📄 [0000 ↓] 2324     /tmp/urltest_webdav/util_fns.c
-201 📄 [0000 ↑] 3594     /tmp/urltest_webdav/README.md
-204 📄 [0000 ✖︎] 1363     /tmp/urltest_webdav/http_stats.h
-201 📄 [0000 ↑] 1734     /tmp/urltest_webdav/CMakeLists.txt
-207 📄 [0000 ℹ] 3594     /tmp/urltest_webdav/README.md
-204 📄 [0000 ✖︎] 2324     /tmp/urltest_webdav/util_fns.c
-201 📄 [0000 ↑] 11352    /tmp/urltest_webdav/http_ops.c
-200 📄 [0000 ↓] 370      /tmp/urltest_webdav/util_fns.h
-200 📄 [0000 ↓] 3594     /tmp/urltest_webdav/README.md
-207 📄 [0000 ℹ] 11352    /tmp/urltest_webdav/http_ops.c
-207 📄 [0000 ℹ] 2856     /tmp/urltest_webdav/fs_entity.h
-204 📄 [0000 ✖︎] 370      /tmp/urltest_webdav/util_fns.h
-200 📄 [0000 ↓] 11352    /tmp/urltest_webdav/http_ops.c
-207 📄 [0000 ℹ] 1734     /tmp/urltest_webdav/CMakeLists.txt
- :
-204 📄 [0000 ✖︎] 424      /tmp/urltest_webdav/.git/hooks/pre-applypatch.sample
-207 📄 [0000 ℹ] 478      /tmp/urltest_webdav/.git/hooks/applypatch-msg.sample
-207 📄 [0000 ℹ] 189      /tmp/urltest_webdav/.git/hooks/post-update.sample
-204 📁 [0000 ✖︎] 102      /tmp/urltest_webdav/.git/objects/cc
-200 📄 [0000 ↓] 478      /tmp/urltest_webdav/.git/hooks/applypatch-msg.sample
-207 📁 [0000 ℹ] 238      /tmp/urltest_webdav/.git/objects
-200 📄 [0000 ↓] 189      /tmp/urltest_webdav/.git/hooks/post-update.sample
-200 📄 [0000 ↓] 1348     /tmp/urltest_webdav/.git/hooks/pre-push.sample
-200 📁 [0000 ↓] 238      /tmp/urltest_webdav/.git/objects
-204 📁 [0000 ✖︎] 238      /tmp/urltest_webdav/.git/objects
-204 📄 [0000 ✖︎] 1348     /tmp/urltest_webdav/.git/hooks/pre-push.sample
-207 📄 [0000 ℹ] 544      /tmp/urltest_webdav/.git/hooks/pre-receive.sample
-204 📄 [0000 ✖︎] 189      /tmp/urltest_webdav/.git/hooks/post-update.sample
-200 📄 [0000 ↓] 544      /tmp/urltest_webdav/.git/hooks/pre-receive.sample
-204 📄 [0000 ✖︎] 478      /tmp/urltest_webdav/.git/hooks/applypatch-msg.sample
-204 📄 [0000 ✖︎] 544      /tmp/urltest_webdav/.git/hooks/pre-receive.sample
-207 📁 [0000 ℹ] 408      /tmp/urltest_webdav/.git/hooks
-200 📁 [0000 ↓] 408      /tmp/urltest_webdav/.git/hooks
-204 📁 [0000 ✖︎] 408      /tmp/urltest_webdav/.git/hooks
-207 📁 [0000 ℹ] 442      /tmp/urltest_webdav/.git
-200 📁 [0000 ↓] 442      /tmp/urltest_webdav/.git
-204 📁 [0000 ✖︎] 442      /tmp/urltest_webdav/.git
-207 📁 [0000 ℹ] 510      /tmp/urltest_webdav
-200 📁 [0000 ↓] 510      /tmp/urltest_webdav
-204 📁 [0000 ✖︎] 510      /tmp/urltest_webdav
-Generation 1 completed
-~~~~
-
-Were this same command to be repeated, the order of file/directory processing would look different.
-
-Command line options are present to alter the verbosity of the program, provide static hostname-to-IP mappings, set HTTP basic authentication parameters, and trigger a dry-run testing (no actual HTTP transactions).
+Other command line options are present to alter the verbosity of the program, provide static hostname-to-IP mappings, set HTTP basic authentication parameters, export HTTP timing statistics, and trigger dry-run testing (no actual HTTP transactions).
 
 ~~~~
 $ ./urltest_webdav -h
 version 1.0.0
-built Nov 10 2017 16:48:10
+built Nov 13 2017 14:04:43
 usage:
 
-  ./urltest_webdav {options} <directory> {<directory> ..}
+  ./urltest_webdav {options} <entity> {<entity> ..}
 
  options:
 
@@ -154,7 +147,15 @@ usage:
 
   --generations/-g <#>         maximum number of generations to iterate
 
-  --base-url/-U <URL>          the base URL to which the content should be mirrored
+  --base-url/-U <remote URL>   the base URL to which the content should be mirrored;
+                               if this parameter is omitted then each <entity> must be
+                               a pair of values:  the local file/directory and the base
+                               URL to which to mirror it:
+
+                                 <entity> = <file|directory> <remote URL>
+
+                               if the --base-url/-U option is used, then <entity> is just
+                               the <file|directory> portion
   --host-mapping/-m <hostmap>  provide a static DNS mapping for a hostname and TCP/IP
                                port
 

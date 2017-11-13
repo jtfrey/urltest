@@ -708,11 +708,68 @@ http_ops_getinfo(
 //
 
 bool
+__http_ops_options_has_method(
+  const char    *method_list,
+  const char    *method,
+  size_t        method_list_len
+)
+{
+  size_t        method_len = strlen(method);
+  
+  while ( *method_list && (method_len <= method_list_len) ) {
+    if ( strncasecmp(method_list, method, method_len) == 0 ) return true;
+    method_list++, method_list_len--;
+  }
+  return false;
+}
+
+enum {
+  http_ops_options_has_delete = 1,
+  http_ops_options_has_propfind = 2
+};
+
+size_t
+__http_ops_options_header_callback(
+  char    *buffer,
+  size_t  size,
+  size_t  nitems,
+  void    *userdata
+)
+{
+  size_t  header_len = size * nitems;
+  long    *method_mask = (long*)userdata;
+  
+  if ( header_len > 6 ) {
+    if ( strncasecmp(buffer, "Allow:", 6) == 0 ) {
+      char    *methods = buffer + 6;
+      size_t  methods_len = header_len - 6;
+      
+      while ( methods_len && isspace(*methods) ) methods++, methods_len--;
+      
+      if ( ! __http_ops_options_has_method(methods, "PROPFIND", methods_len) ) {
+        fprintf(stderr, "WARNING:  server does not support the PROPFIND method\n");
+      } else {
+        *method_mask |= http_ops_options_has_propfind;
+      }
+      
+      if ( ! __http_ops_options_has_method(methods, "DELETE", methods_len) ) {
+        fprintf(stderr, "WARNING:  server does not support the DELETE method\n");
+      } else {
+        *method_mask |= http_ops_options_has_delete;
+      }
+    }
+  }
+  return header_len;
+}
+
+bool
 http_ops_options(
   http_ops_ref    ops,
   const char      *url,
   http_stats_ref  stats,
-  long            *http_status
+  long            *http_status,
+  bool            *has_propfind,
+  bool            *has_delete
 )
 {
   CURL            *curl_request = __http_ops_get_curl_request(ops, http_ops_curl_request_options);
@@ -720,12 +777,19 @@ http_ops_options(
   
   if ( curl_request ) {
     CURLcode      ccode;
+    long          method_mask = 0L;
     
+    curl_easy_setopt(curl_request, CURLOPT_HEADERFUNCTION, __http_ops_options_header_callback);
+    curl_easy_setopt(curl_request, CURLOPT_HEADERDATA, &method_mask);
     curl_easy_setopt(curl_request, CURLOPT_URL, url);
     ccode = curl_easy_perform(curl_request);
     if ( ccode == CURLE_OK ) {
       curl_easy_getinfo(curl_request, CURLINFO_RESPONSE_CODE, http_status);
       http_stats_update(stats, curl_request);
+      
+      *has_propfind = ((method_mask & http_ops_options_has_propfind) == http_ops_options_has_propfind) ? true : false;
+      *has_delete = ((method_mask & http_ops_options_has_delete) == http_ops_options_has_delete) ? true : false;
+      
       rc = true;
     }
   }
