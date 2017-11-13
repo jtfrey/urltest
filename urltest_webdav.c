@@ -114,6 +114,13 @@ usage(
       "  --ranged-ops/-r              enable ranged GET operations\n"
       "  --no-options/-O              disable OPTIONS operations\n"
       "\n"
+      " environment:\n"
+      "\n"
+      "   URLTEST_WEBDAV_USER         default user name for HTTP requests; is overridden by\n"
+      "                               the --username/-u option\n"
+      "   URLTEST_WEBDAV_PASSWORD     password to use for authenticated HTTP requests; is\n"
+      "                               overridden by the --password/-p option\n"
+      "\n"
       ,
       urltest_webdav_version_string,
       exe
@@ -124,7 +131,8 @@ usage(
 
 void
 http_error_exit(
-  long      http_status
+  const char  *url,
+  long        http_status
 )
 {
   bool      do_not_exit = false;
@@ -133,7 +141,7 @@ http_error_exit(
   switch ( http_status / 100 ) {
   
     case 4: {
-      fprintf(stderr, "REQUEST ERROR(%ld): ", http_status);
+      fprintf(stderr, "REQUEST ERROR(%ld) for '%s' : ", http_status, url);
       switch ( http_status ) {
         case 400:
           fprintf(stderr, "request was not properly constructed\n");
@@ -215,6 +223,14 @@ main(
   const char                *base_url = NULL;
   http_ops_ref              http_ops = http_ops_create();
   const char								*timing_output = NULL;
+  
+  if ( getenv("URLTEST_WEBDAV_USER") ) {
+    http_ops_set_username(http_ops, getenv("URLTEST_WEBDAV_USER"));
+  }
+  
+  if ( getenv("URLTEST_WEBDAV_PASSWORD") ) {
+    http_ops_set_password(http_ops, getenv("URLTEST_WEBDAV_PASSWORD"));
+  }
 
   optind = 0;
   while ( (opt = getopt_long(argc, argv, urltest_webdav_optstring, urltest_webdav_options, NULL)) != -1 ) {
@@ -496,7 +512,7 @@ main(
                             break;
                           }
                         case 5:
-                          http_error_exit(http_status);
+                          http_error_exit(url, http_status);
                           ok = false;
                           break;
                           
@@ -534,7 +550,7 @@ main(
                           
                         case 4:
                         case 5:
-                          http_error_exit(http_status);
+                          http_error_exit(url, http_status);
                           ok = false;
                           break;
                           
@@ -550,7 +566,7 @@ main(
                       
                         case 4:
                         case 5:
-                          http_error_exit(http_status);
+                          http_error_exit(url, http_status);
                           ok = false;
                           break;
                           
@@ -566,7 +582,7 @@ main(
                       
                         case 4:
                         case 5:
-                          http_error_exit(http_status);
+                          http_error_exit(url, http_status);
                           ok = false;
                           break;
                           
@@ -582,7 +598,7 @@ main(
                       
                         case 4:
                         case 5:
-                          http_error_exit(http_status);
+                          http_error_exit(url, http_status);
                           ok = false;
                           break;
                           
@@ -612,7 +628,7 @@ main(
                           
                         case 4:
                         case 5:
-                          http_error_exit(http_status);
+                          http_error_exit(url, http_status);
                           ok = false;
                           break;
                           
@@ -650,7 +666,7 @@ main(
                       
                         case 4:
                         case 5:
-                          http_error_exit(http_status);
+                          http_error_exit(url, http_status);
                           ok = false;
                           break;
                           
@@ -666,7 +682,7 @@ main(
                       
                         case 4:
                         case 5:
-                          http_error_exit(http_status);
+                          http_error_exit(url, http_status);
                           ok = false;
                           break;
                           
@@ -682,7 +698,7 @@ main(
                       
                         case 4:
                         case 5:
-                          http_error_exit(http_status);
+                          http_error_exit(url, http_status);
                           ok = false;
                           break;
                           
@@ -698,7 +714,7 @@ main(
                       
                         case 4:
                         case 5:
-                          http_error_exit(http_status);
+                          http_error_exit(url, http_status);
                           ok = false;
                           break;
                           
@@ -714,7 +730,7 @@ main(
                       
                         case 4:
                         case 5:
-                          http_error_exit(http_status);
+                          http_error_exit(url, http_status);
                           ok = false;
                           break;
                           
