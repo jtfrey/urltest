@@ -83,4 +83,5 @@ CONFIGURE_FILE(config.h.in config.h)
 ADD_EXECUTABLE(urltest_webdav fs_entity.c http_ops.c http_stats.c util_fns.c urltest_webdav.c)
 TARGET_INCLUDE_DIRECTORIES(urltest_webdav PUBLIC ${CMAKE_CURRENT_BINARY_DIR} ${CURL_INCLUDE_DIRS})
 TARGET_LINK_LIBRARIES(urltest_webdav -lm ${CURL_LIBRARIES})
+INSTALL(TARGETS urltest_webdav DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT binaries)
 
