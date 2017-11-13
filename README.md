@@ -6,10 +6,14 @@ Want to stress-test your WebDAV server?  This project is a C program that uses l
 - establish optional TLS/SSL encryption on the connection
 - send the HTTP request
 - begin reading the HTTP response
+
 as well as
+
 - total time for HTTP request and response
 - bytes transferred for the HTTP response
+
 Statistics for the requests are aggregated by:
+
 - all HTTP status codes
 - 200-level HTTP status codes
 - 300-level HTTP status codes
