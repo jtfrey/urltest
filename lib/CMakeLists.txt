@@ -1,0 +1,14 @@
+CMAKE_MINIMUM_REQUIRED (VERSION 2.6)
+PROJECT (liburltest C)
+
+CONFIGURE_FILE(config.h.in config.h)
+ADD_LIBRARY(urltest STATIC util_fns.c fs_entity.c http_ops.c http_stats.c config.c)
+INCLUDE_DIRECTORIES(BEFORE ${CMAKE_CURRENT_BINARY_DIR})
+
+SET_TARGET_PROPERTIES(urltest PROPERTIES PUBLIC_HEADER "${CMAKE_CURRENT_BINARY_DIR}/config.h;util_fns.h;fs_entity.h;http_ops.h;http_stats.h")
+
+INSTALL(TARGETS urltest 
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+  )
+

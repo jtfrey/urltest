@@ -18,13 +18,6 @@
 
 //
 
-#ifndef URLTEST_WEBDAV_VERSION_STRING
-# error URLTEST_WEBDAV_VERSION_STRING is not defined
-#endif
-const char   *urltest_webdav_version_string = URLTEST_WEBDAV_VERSION_STRING;
-
-//
-
 static const struct option urltest_webdav_options[] = {
     { "help",             no_argument,          NULL,       'h' },
     //
@@ -41,17 +34,18 @@ static const struct option urltest_webdav_options[] = {
     //
     { "base-url",         required_argument,    NULL,       'U' },
     { "host-mapping",     required_argument,    NULL,       'm' },
-    { "no-delete",        no_argument,          NULL,       'D' },
     { "username",         required_argument,    NULL,       'u' },
     { "password",         required_argument,    NULL,       'p' },
     { "no-cert-verify",   no_argument,          NULL,       'k' },
     { "no-random-walk",   no_argument,          NULL,       'W' },
+    { "no-follow-3xx",    no_argument,          NULL,       'F' },
+    { "no-delete",        no_argument,          NULL,       'D' },
     { "ranged-ops",       no_argument,          NULL,       'r' },
     { "no-options",       no_argument,          NULL,       'O' },
     { NULL,               0,                    NULL,        0  }
   };
 
-static const char *urltest_webdav_optstring = "h" "lsna" "vVdtg:" "U:m:Du:p:kWrO";
+static const char *urltest_webdav_optstring = "h" "lsna" "vVdtg:" "U:m:u:p:kWFDrO";
 
 //
 
@@ -103,7 +97,6 @@ usage(
       "\n"
       "                                 <hostmap> = <hostname>:<port>:<ip address>\n"
       "\n"
-      "  --no-delete/-D               do not delete anything on the remote side\n"
       "  --username/-u <string>       use HTTP basic authentication with the given string as\n"
       "                               the username\n"
       "  --password/-p <string>       use HTTP basic authentication with the given string as\n"
@@ -111,6 +104,8 @@ usage(
       "  --no-cert-verify/-k          do not require SSL certificate verfication for connections\n"
       "                               to succeed\n"
       "  --no-random-walk/-W          process the file list as a simple depth-first traversal\n"
+      "  --no-follow-3xx/-F           do not automatically follow HTTP 3XX redirects\n"
+      "  --no-delete/-D               do not delete anything on the remote side\n"
       "  --ranged-ops/-r              enable ranged GET operations\n"
       "  --no-options/-O              disable OPTIONS operations\n"
       "\n"
@@ -122,7 +117,7 @@ usage(
       "                               overridden by the --password/-p option\n"
       "\n"
       ,
-      urltest_webdav_version_string,
+      urltest_version_string,
       exe
     );
 }
@@ -132,7 +127,8 @@ usage(
 void
 http_error_exit(
   const char  *url,
-  long        http_status
+  long        http_status,
+  const char  *addl_info
 )
 {
   bool      do_not_exit = false;
@@ -192,6 +188,7 @@ http_error_exit(
     }
   
   }
+  if ( addl_info && *addl_info ) fprintf(stderr, "  %s\n", addl_info);
   if ( ! do_not_exit ) exit(rc);
 }
 
@@ -343,10 +340,6 @@ main(
         break;
       }
       
-      case 'D':
-        should_delete = false;
-        break;
-      
       case 'u': {
         if ( optarg && *optarg ) {
           if ( ! http_ops_set_username(http_ops, optarg) ) {
@@ -381,6 +374,14 @@ main(
         should_do_random_walk = false;
         break;
       
+      case 'F':
+        http_ops_set_should_follow_redirects(http_ops, false);
+        break;
+      
+      case 'D':
+        should_delete = false;
+        break;
+      
       case 'r':
         should_do_ranged_ops = true;
         break;
@@ -397,17 +398,7 @@ main(
     exit(EINVAL);
   }
   
-  if ( should_do_random_walk ) {
-#ifdef HAVE_SRANDOMDEV
-    srandomdev();
-#else
-# ifdef HAVE_SRANDOM
-    srandom(time(NULL));
-# else
-    srand(time(NULL));
-# endif /* HAVE_SRANDOM */
-#endif /* HAVE_SRANDOMDEV */
-  }
+  if ( should_do_random_walk ) init_random_long();
   
   if ( is_verbose && base_url ) {
     printf("\nMirroring content to '%s'\n", base_url);
@@ -502,7 +493,7 @@ main(
               case fs_entity_kind_directory: {
                 switch ( e->state ) {
                   case fs_entity_state_upload: {
-                    ok = http_ops_mkdir(http_ops, url, e->http_stats[http_ops_method_mkcol], &http_status);
+                    ok = http_ops_mkdir(http_ops, url, e->http_stats[http_ops_method_mkcol], NULL, &http_status);
                     if ( ok ) {
                       switch ( http_status / 100 ) {
                       
@@ -512,7 +503,7 @@ main(
                             break;
                           }
                         case 5:
-                          http_error_exit(url, http_status);
+                          http_error_exit(url, http_status, http_ops_get_error_buffer(http_ops));
                           ok = false;
                           break;
                           
@@ -524,7 +515,7 @@ main(
                   case fs_entity_state_options: {
                     bool    has_propfind = false, has_delete = false;
                     
-                    ok = http_ops_options(http_ops, url, e->http_stats[http_ops_method_options], &http_status, &has_propfind, &has_delete);
+                    ok = http_ops_options(http_ops, url, e->http_stats[http_ops_method_options], NULL, &http_status, &has_propfind, &has_delete);
                     if ( ok ) {
                       switch ( http_status / 100 ) {
                         case 2:
@@ -550,7 +541,7 @@ main(
                           
                         case 4:
                         case 5:
-                          http_error_exit(url, http_status);
+                          http_error_exit(url, http_status, http_ops_get_error_buffer(http_ops));
                           ok = false;
                           break;
                           
@@ -560,13 +551,13 @@ main(
                   }
                   
                   case fs_entity_state_getinfo: {
-                    ok = http_ops_getinfo(http_ops, url, e->http_stats[http_ops_method_propfind], &http_status);
+                    ok = http_ops_getinfo(http_ops, url, e->http_stats[http_ops_method_propfind], NULL, &http_status);
                     if ( ok ) {
                       switch ( http_status / 100 ) {
                       
                         case 4:
                         case 5:
-                          http_error_exit(url, http_status);
+                          http_error_exit(url, http_status, http_ops_get_error_buffer(http_ops));
                           ok = false;
                           break;
                           
@@ -576,13 +567,13 @@ main(
                   }
                   
                   case fs_entity_state_download: {
-                    ok = http_ops_download(http_ops, url, NULL, e->http_stats[http_ops_method_get], &http_status);
+                    ok = http_ops_download(http_ops, url, NULL, e->http_stats[http_ops_method_get], NULL, &http_status);
                     if ( ok ) {
                       switch ( http_status / 100 ) {
                       
                         case 4:
                         case 5:
-                          http_error_exit(url, http_status);
+                          http_error_exit(url, http_status, http_ops_get_error_buffer(http_ops));
                           ok = false;
                           break;
                           
@@ -592,13 +583,13 @@ main(
                   }
                   
                   case fs_entity_state_delete: {
-                    ok = http_ops_delete(http_ops, url, e->http_stats[http_ops_method_delete], &http_status);
+                    ok = http_ops_delete(http_ops, url, e->http_stats[http_ops_method_delete], NULL, &http_status);
                     if ( ok ) {
                       switch ( http_status / 100 ) {
                       
                         case 4:
                         case 5:
-                          http_error_exit(url, http_status);
+                          http_error_exit(url, http_status, http_ops_get_error_buffer(http_ops));
                           ok = false;
                           break;
                           
@@ -622,13 +613,13 @@ main(
               case fs_entity_kind_file: {
                 switch ( e->state ) {
                   case fs_entity_state_upload: {
-                    ok = http_ops_upload(http_ops, e->path, url, e->http_stats[http_ops_method_put], &http_status);
+                    ok = http_ops_upload(http_ops, e->path, url, e->http_stats[http_ops_method_put], NULL, &http_status);
                     if ( ok ) {
                       switch ( http_status / 100 ) {
                           
                         case 4:
                         case 5:
-                          http_error_exit(url, http_status);
+                          http_error_exit(url, http_status, http_ops_get_error_buffer(http_ops));
                           ok = false;
                           break;
                           
@@ -640,7 +631,7 @@ main(
                   case fs_entity_state_options: {
                     bool    has_propfind = false, has_delete = false;
                     
-                    ok = http_ops_options(http_ops, url, e->http_stats[http_ops_method_options], &http_status, &has_propfind, &has_delete);
+                    ok = http_ops_options(http_ops, url, e->http_stats[http_ops_method_options], NULL, &http_status, &has_propfind, &has_delete);
                     if ( ok ) {
                       switch ( http_status / 100 ) {
                         case 2:
@@ -666,7 +657,7 @@ main(
                       
                         case 4:
                         case 5:
-                          http_error_exit(url, http_status);
+                          http_error_exit(url, http_status, http_ops_get_error_buffer(http_ops));
                           ok = false;
                           break;
                           
@@ -676,13 +667,13 @@ main(
                   }
                   
                   case fs_entity_state_getinfo: {
-                    ok = http_ops_getinfo(http_ops, url, e->http_stats[http_ops_method_propfind], &http_status);
+                    ok = http_ops_getinfo(http_ops, url, e->http_stats[http_ops_method_propfind], NULL, &http_status);
                     if ( ok ) {
                       switch ( http_status / 100 ) {
                       
                         case 4:
                         case 5:
-                          http_error_exit(url, http_status);
+                          http_error_exit(url, http_status, http_ops_get_error_buffer(http_ops));
                           ok = false;
                           break;
                           
@@ -692,13 +683,13 @@ main(
                   }
                   
                   case fs_entity_state_download: {
-                    ok = http_ops_download(http_ops, url, NULL, e->http_stats[http_ops_method_get], &http_status);
+                    ok = http_ops_download(http_ops, url, NULL, e->http_stats[http_ops_method_get], NULL, &http_status);
                     if ( ok ) {
                       switch ( http_status / 100 ) {
                       
                         case 4:
                         case 5:
-                          http_error_exit(url, http_status);
+                          http_error_exit(url, http_status, http_ops_get_error_buffer(http_ops));
                           ok = false;
                           break;
                           
@@ -708,13 +699,13 @@ main(
                   }
                   
                   case fs_entity_state_download_range: {
-                    ok = http_ops_download_range(http_ops, url, NULL, e->http_stats[http_ops_method_get], &http_status, (long int)e->size);
+                    ok = http_ops_download_range(http_ops, url, NULL, e->http_stats[http_ops_method_get], NULL, &http_status, (long int)e->size);
                     if ( ok ) {
                       switch ( http_status / 100 ) {
                       
                         case 4:
                         case 5:
-                          http_error_exit(url, http_status);
+                          http_error_exit(url, http_status, http_ops_get_error_buffer(http_ops));
                           ok = false;
                           break;
                           
@@ -724,13 +715,13 @@ main(
                   }
                   
                   case fs_entity_state_delete: {
-                    ok = http_ops_delete(http_ops, url, e->http_stats[http_ops_method_delete], &http_status);
+                    ok = http_ops_delete(http_ops, url, e->http_stats[http_ops_method_delete], NULL, &http_status);
                     if ( ok ) {
                       switch ( http_status / 100 ) {
                       
                         case 4:
                         case 5:
-                          http_error_exit(url, http_status);
+                          http_error_exit(url, http_status, http_ops_get_error_buffer(http_ops));
                           ok = false;
                           break;
                           

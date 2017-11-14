@@ -1,0 +1,9 @@
+CMAKE_MINIMUM_REQUIRED (VERSION 2.6)
+PROJECT (urltest_getlist C)
+
+ADD_EXECUTABLE(urltest_getlist-exe urltest_getlist.c)
+SET_TARGET_PROPERTIES(urltest_getlist-exe PROPERTIES OUTPUT_NAME urltest_getlist)
+TARGET_LINK_LIBRARIES(urltest_getlist-exe urltest -lm ${CURL_LIBRARIES})
+INCLUDE_DIRECTORIES(BEFORE ${CMAKE_CURRENT_BINARY_DIR}/../lib ${CMAKE_SOURCE_DIR}/lib)
+INSTALL(TARGETS urltest_getlist-exe DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT binaries)
+

@@ -8,8 +8,6 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
-#include <curl/curl.h>
-
 //
 
 const char*
@@ -161,24 +159,12 @@ __http_ops_propfind_read(
 
 //
 
-typedef enum {
-  http_ops_curl_request_get   = 0,
-  http_ops_curl_request_put,
-  http_ops_curl_request_delete,
-  http_ops_curl_request_mkcol,
-  http_ops_curl_request_propfind,
-  http_ops_curl_request_options,
-  //
-  http_ops_curl_request_max
-} http_ops_curl_request;
-
-//
-
 typedef struct _http_ops {
   bool                is_verbose;
   struct curl_slist   *resolve_list;
   const char          *username, *password;
   bool                should_verify_peer;
+  bool                should_follow_redirects;
   CURL*               request_objs[http_ops_curl_request_max];
   struct curl_slist*  request_headers[http_ops_curl_request_max];
   char                curl_error_buffer[CURL_ERROR_SIZE];
@@ -229,6 +215,7 @@ __http_ops_get_curl_request(
   }
   if ( new_request ) {
     curl_easy_setopt(new_request, CURLOPT_VERBOSE, ops->is_verbose ? 1L : 0L);
+    curl_easy_setopt(new_request, CURLOPT_FOLLOWLOCATION, ops->should_follow_redirects ? 1L : 0L);
     curl_easy_setopt(new_request, CURLOPT_ERRORBUFFER, &ops->curl_error_buffer[0]);
     if ( ops->resolve_list ) curl_easy_setopt(new_request, CURLOPT_RESOLVE, ops->resolve_list);
     if ( ops->username ) {
@@ -313,6 +300,7 @@ http_ops_create()
   new_ops = malloc(sizeof(http_ops));
   if ( new_ops ) {
     memset(new_ops, 0, sizeof(http_ops));
+    new_ops->should_follow_redirects    = true;
   }
   return new_ops;
 }
@@ -365,6 +353,27 @@ http_ops_set_is_verbose(
 )
 {
   ops->is_verbose = is_verbose;
+}
+
+//
+
+bool
+http_ops_get_should_follow_redirects(
+  http_ops_ref  ops
+)
+{
+  return ops->should_follow_redirects;
+}
+
+//
+
+void
+http_ops_set_should_follow_redirects(
+  http_ops_ref  ops,
+  bool          should_follow_redirects
+)
+{
+  ops->should_follow_redirects = should_follow_redirects;
 }
 
 //
@@ -442,6 +451,18 @@ http_ops_set_password(
 
 //
 
+CURL*
+http_ops_curl_handle_for_request(
+  http_ops_ref          ops,
+  http_ops_curl_request req_type
+)
+{
+  if ( req_type >= http_ops_curl_request_get && req_type < http_ops_curl_request_max ) return ops->request_objs[req_type];
+  return NULL;
+}
+
+//
+
 bool
 http_ops_add_host_mapping(
   http_ops_ref  ops,
@@ -485,10 +506,11 @@ http_ops_add_host_mapping_string(
 
 bool
 http_ops_mkdir(
-  http_ops_ref    ops,
-  const char      *url,
-  http_stats_ref  stats,
-  long            *http_status
+  http_ops_ref        ops,
+  const char          *url,
+  http_stats_ref      stats,
+  http_stats_record   *req_stats, 
+  long                *http_status
 )
 {
   CURL            *curl_request = __http_ops_get_curl_request(ops, http_ops_curl_request_mkcol);
@@ -501,7 +523,7 @@ http_ops_mkdir(
     ccode = curl_easy_perform(curl_request);
     if ( ccode == CURLE_OK ) {
       curl_easy_getinfo(curl_request, CURLINFO_RESPONSE_CODE, http_status);
-      http_stats_update(stats, curl_request);
+      http_stats_update_and_copy(stats, curl_request, req_stats);
       rc = true;
     }
   }
@@ -512,11 +534,12 @@ http_ops_mkdir(
 
 bool
 http_ops_upload(
-  http_ops_ref    ops,
-  const char      *path,
-  const char      *url,
-  http_stats_ref  stats,
-  long            *http_status
+  http_ops_ref        ops,
+  const char          *path,
+  const char          *url,
+  http_stats_ref      stats,
+  http_stats_record   *req_stats, 
+  long                *http_status
 )
 {
   CURL            *curl_request = __http_ops_get_curl_request(ops, http_ops_curl_request_put);
@@ -534,7 +557,7 @@ http_ops_upload(
       fclose(in_file);
       if ( ccode == CURLE_OK ) {
         curl_easy_getinfo(curl_request, CURLINFO_RESPONSE_CODE, http_status);
-        http_stats_update(stats, curl_request);
+        http_stats_update_and_copy(stats, curl_request, req_stats);
         rc = true;
       }
     }
@@ -546,11 +569,12 @@ http_ops_upload(
 
 bool
 http_ops_download(
-  http_ops_ref    ops,
-  const char      *url,
-  const char      *path,
-  http_stats_ref  stats,
-  long            *http_status
+  http_ops_ref        ops,
+  const char          *url,
+  const char          *path,
+  http_stats_ref      stats,
+  http_stats_record   *req_stats, 
+  long                *http_status
 )
 {
   CURL            *curl_request = __http_ops_get_curl_request(ops, http_ops_curl_request_get);
@@ -577,7 +601,7 @@ http_ops_download(
     }
     if ( ccode == CURLE_OK ) {
       curl_easy_getinfo(curl_request, CURLINFO_RESPONSE_CODE, http_status);
-      http_stats_update(stats, curl_request);
+      http_stats_update_and_copy(stats, curl_request, req_stats);
       rc = true;
     }
   }
@@ -588,12 +612,13 @@ http_ops_download(
 
 bool
 http_ops_download_range(
-  http_ops_ref    ops,
-  const char      *url,
-  const char      *path,
-  http_stats_ref  stats,
-  long            *http_status,
-  long            expected_length
+  http_ops_ref        ops,
+  const char          *url,
+  const char          *path,
+  http_stats_ref      stats,
+  http_stats_record   *req_stats, 
+  long                *http_status,
+  long                expected_length
 )
 {
   CURL            *curl_request = __http_ops_get_curl_request(ops, http_ops_curl_request_get);
@@ -643,7 +668,7 @@ http_ops_download_range(
     }
     if ( ccode == CURLE_OK ) {
       curl_easy_getinfo(curl_request, CURLINFO_RESPONSE_CODE, http_status);
-      http_stats_update(stats, curl_request);
+      http_stats_update_and_copy(stats, curl_request, req_stats);
       rc = true;
     }
   }
@@ -654,10 +679,11 @@ http_ops_download_range(
 
 bool
 http_ops_delete(
-  http_ops_ref    ops,
-  const char      *url,
-  http_stats_ref  stats,
-  long            *http_status
+  http_ops_ref        ops,
+  const char          *url,
+  http_stats_ref      stats,
+  http_stats_record   *req_stats, 
+  long                *http_status
 )
 {
   CURL            *curl_request = __http_ops_get_curl_request(ops, http_ops_curl_request_delete);
@@ -670,7 +696,7 @@ http_ops_delete(
     ccode = curl_easy_perform(curl_request);
     if ( ccode == CURLE_OK ) {
       curl_easy_getinfo(curl_request, CURLINFO_RESPONSE_CODE, http_status);
-      http_stats_update(stats, curl_request);
+      http_stats_update_and_copy(stats, curl_request, req_stats);
       rc = true;
     }
   }
@@ -681,10 +707,11 @@ http_ops_delete(
 
 bool
 http_ops_getinfo(
-  http_ops_ref    ops,
-  const char      *url,
-  http_stats_ref  stats,
-  long            *http_status
+  http_ops_ref        ops,
+  const char          *url,
+  http_stats_ref      stats,
+  http_stats_record   *req_stats, 
+  long                *http_status
 )
 {
   CURL            *curl_request = __http_ops_get_curl_request(ops, http_ops_curl_request_propfind);
@@ -698,7 +725,7 @@ http_ops_getinfo(
     ccode = curl_easy_perform(curl_request);
     if ( ccode == CURLE_OK ) {
       curl_easy_getinfo(curl_request, CURLINFO_RESPONSE_CODE, http_status);
-      http_stats_update(stats, curl_request);
+      http_stats_update_and_copy(stats, curl_request, req_stats);
       rc = true;
     }
   }
@@ -764,12 +791,13 @@ __http_ops_options_header_callback(
 
 bool
 http_ops_options(
-  http_ops_ref    ops,
-  const char      *url,
-  http_stats_ref  stats,
-  long            *http_status,
-  bool            *has_propfind,
-  bool            *has_delete
+  http_ops_ref        ops,
+  const char          *url,
+  http_stats_ref      stats,
+  http_stats_record   *req_stats, 
+  long                *http_status,
+  bool                *has_propfind,
+  bool                *has_delete
 )
 {
   CURL            *curl_request = __http_ops_get_curl_request(ops, http_ops_curl_request_options);
@@ -785,7 +813,7 @@ http_ops_options(
     ccode = curl_easy_perform(curl_request);
     if ( ccode == CURLE_OK ) {
       curl_easy_getinfo(curl_request, CURLINFO_RESPONSE_CODE, http_status);
-      http_stats_update(stats, curl_request);
+      http_stats_update_and_copy(stats, curl_request, req_stats);
       
       *has_propfind = ((method_mask & http_ops_options_has_propfind) == http_ops_options_has_propfind) ? true : false;
       *has_delete = ((method_mask & http_ops_options_has_delete) == http_ops_options_has_delete) ? true : false;

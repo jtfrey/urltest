@@ -21,6 +21,8 @@ typedef enum {
   http_stats_field_max
 } http_stats_field;
 
+typedef double http_stats_record[http_stats_field_max];
+
 typedef enum {
   http_stats_bystatus_all = 0,
   http_stats_bystatus_2XX,
@@ -49,6 +51,7 @@ bool http_stats_get(http_stats_ref the_stats, http_stats_bystatus bystatus, http
 void http_stats_reset(http_stats_ref the_stats);
 
 bool http_stats_update(http_stats_ref the_stats, CURL *curl_request);
+bool http_stats_update_and_copy(http_stats_ref the_stats, CURL *curl_request, http_stats_record *copy);
 
 bool http_stats_is_empty(http_stats_ref the_stats);
 

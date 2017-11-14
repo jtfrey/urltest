@@ -17,8 +17,6 @@ http_stats_bystatus_from_http_status(
 
 //
 
-typedef double http_stats_record[http_stats_field_max];
-
 typedef struct _http_stats {
   unsigned int        count[http_stats_bystatus_max];
   http_stats_record   min[http_stats_bystatus_max];
@@ -102,6 +100,18 @@ http_stats_update(
   CURL              *curl_request
 )
 {
+  return http_stats_update_and_copy(the_stats, curl_request, NULL);
+}
+
+//
+
+bool
+http_stats_update_and_copy(
+  http_stats_ref    the_stats,
+  CURL              *curl_request,
+  http_stats_record *copy
+)
+{
   long                  http_status = -1;
   http_stats_bystatus   i_s;
   http_stats_field      i_f;
@@ -166,6 +176,9 @@ http_stats_update(
       the_stats->s_i[i_s][i_f] += (timing[i_f] - m_prev) * (timing[i_f] - the_stats->m_i[i_s][i_f] );
     }
   }
+  
+  if ( copy ) memcpy(copy, &timing, sizeof(timing));
+  
   return true;
 }
 

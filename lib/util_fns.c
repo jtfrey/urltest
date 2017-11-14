@@ -130,6 +130,22 @@ asprintf(
 
 //
 
+void
+init_random_long()
+{
+#ifdef HAVE_SRANDOMDEV
+  srandomdev();
+#else
+# ifdef HAVE_SRANDOM
+  srandom(time(NULL));
+# else
+  srand(time(NULL));
+# endif /* HAVE_SRANDOM */
+#endif /* HAVE_SRANDOMDEV */
+}
+
+//
+
 long int
 random_long_int()
 {
