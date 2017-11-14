@@ -1,5 +1,5 @@
 CMAKE_MINIMUM_REQUIRED (VERSION 2.6)
-PROJECT (urltest_webdav C)
+PROJECT (urltest C)
 
 #
 # Program version:

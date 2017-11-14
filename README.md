@@ -1,6 +1,11 @@
-# urltest_webdav
+# urltest
 
-Want to stress-test your WebDAV server?  This project is a C program that uses libcurl to perform a sequence of random-order WebDAV-style uploads of a directory/file to a remote URL.  The fine-grain timing features present in libcurl are used to generate timing statistics for each directory/file present.  The data points embody the time measured by libcurl to:
+This project embodies two testing procedures that were necessary to test a new web server farm for:
+
+- Correctly serving content versus the single server it was replacing
+- Properly handling publishing via WebDAV
+
+The project consists of a supporting library of routines that leverage the cURL library to implement the requests and report fine-grain timing that cURL provides for each request.  The cURL library records the times to:
 - perform DNS lookup of the target host
 - open a TCP connection to the target host
 - establish optional TLS/SSL encryption on the connection
@@ -11,6 +16,70 @@ as well as
 
 - total time for HTTP request and response
 - bytes transferred for the HTTP response
+
+## urltest_getlist
+
+The first series of tests we wanted to perform involved having multiple clients concurrently fetch a list of 63174 URLs, recording timing for each request and overall timing statistics for each response category (2XX, 3XX, etc.).  One of our HPC clusters was employed, with 5 nodes running 100 workers, each having a uniquely-ordered variant of the URL list.
+
+~~~~
+$ urltest_getlist -h
+version 1.0.0
+built Nov 14 2017 13:59:31
+usage:
+
+  urltest_getlist {options} <entity> {<entity> ..}
+
+ options:
+
+  --help/-h                    show this information
+
+  --verbose/-v                 display additional information to stdout as the
+                               program progresses
+  --verbose-curl/-V            ask cURL to display verbose request progress to
+                               stderr
+  --dry-run/-d                 do not perform any HTTP requests, just show an
+                               activity trace
+  -t                           show HTTP timing statistics as a table to stdout
+  --show-timings=<out>         show HTTP timing statistics at the end of the run
+
+                                 <out> = <format>{:<path>}
+                                 <format> = table | csv | tsv
+
+  --base-url/-U <remote URL>   prepend the given <remote URL> to each URL read from the
+                               url list; implies that URLs on the url list will be path
+                               components that should be appended to a base URL
+  --url-list/-l <path>         read URLs from the given <path>, one per line; use a dash
+                               to indicate the default (stdin)
+  --host-mapping/-m <hostmap>  provide a static DNS mapping for a hostname and TCP/IP
+                               port
+
+                                 <hostmap> = <hostname>:<port>:<ip address>
+
+  --username/-u <string>       use HTTP basic authentication with the given string as
+                               the username
+  --password/-p <string>       use HTTP basic authentication with the given string as
+                               the password
+  --retries/-r <#>             for failed cURL requests retry this number of times before
+                               hard failing the URL in question (default: 1)
+  --no-cert-verify/-k          do not require SSL certificate verfication for connections
+                               to succeed
+  --follow-3xx/-f              attempt to follow all HTTP 3XX responses to the eventual
+                               non-3XX target
+
+ environment:
+
+   URLTEST_GETLIST_USER        default user name for HTTP requests; is overridden by
+                               the --username/-u option
+   URLTEST_GETLIST_PASSWORD    password to use for authenticated HTTP requests; is
+                               overridden by the --password/-p option
+
+~~~~
+
+The `--host-mapping` option, in particular, was very helpful since it allowed the same list of URLs to be used against the production web server and the web farm that will replace it:  in both instances, the target server was handed the same `Host: www1.udel.edu` header so the test reflected what the farm would see when in production.
+
+## urltest_webdav
+
+Want to stress-test your WebDAV server?  This project is a C program that uses libcurl to perform a sequence of random-order WebDAV-style uploads of a directory/file to a remote URL.  The fine-grain timing features present in libcurl are used to generate timing statistics for each directory/file present.
 
 Statistics for the requests are aggregated by:
 
@@ -165,7 +234,6 @@ usage:
 
                                  <hostmap> = <hostname>:<port>:<ip address>
 
-  --no-delete/-D               do not delete anything on the remote side
   --username/-u <string>       use HTTP basic authentication with the given string as
                                the username
   --password/-p <string>       use HTTP basic authentication with the given string as
@@ -173,6 +241,8 @@ usage:
   --no-cert-verify/-k          do not require SSL certificate verfication for connections
                                to succeed
   --no-random-walk/-W          process the file list as a simple depth-first traversal
+  --no-follow-3xx/-F           do not automatically follow HTTP 3XX redirects
+  --no-delete/-D               do not delete anything on the remote side
   --ranged-ops/-r              enable ranged GET operations
   --no-options/-O              disable OPTIONS operations
 
